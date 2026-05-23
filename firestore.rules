@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default rule - fallback denial
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shops: anyone can view, submit, and claim local stores
+    match /shops/{shopId} {
+      allow read, write: if true;
+    }
+
+    // Products: anyone can view or update catalogs (sellers need update access via local PIN)
+    match /products/{productId} {
+      allow read, write: if true;
+    }
+
+    // Owners: anyone can sign up/claim listings, register, and update seller records
+    match /owners/{ownerId} {
+      allow read, write: if true;
+    }
+
+    // Orders: customers can state/create orders, and vendors can update fullfilment status
+    match /orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    // Coupons: shoppers can search and use codes, and system can increment usage counters
+    match /coupons/{code} {
+      allow read, write: if true;
+    }
+
+    // AppSettings: system can read, bootstrap, and configure transaction values
+    match /settings/{docName} {
+      allow read, write: if true;
+    }
+  }
+}

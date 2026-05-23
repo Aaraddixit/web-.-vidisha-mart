@@ -1,0 +1,154 @@
+{
+  "entities": {
+    "Shop": {
+      "title": "Shop",
+      "description": "A niche local storefront registered in VidishaMart.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "phone": { "type": "string" },
+        "area": { "type": "string" },
+        "address": { "type": "string" },
+        "description": { "type": "string" },
+        "openTime": { "type": "string" },
+        "closeTime": { "type": "string" },
+        "minOrder": { "type": "number" },
+        "delivery": { "type": "boolean" },
+        "is24x7": { "type": "boolean" },
+        "plan": { "type": "number" },
+        "img": { "type": "string" },
+        "revenue": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "suspended", "closed"] },
+        "ownerId": { "type": "string" },
+        "slug": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "featured": { "type": "boolean" }
+      },
+      "required": ["id", "name", "category", "phone", "area"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "An item belonging to a specific shop in VidishaMart.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "orgPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "lowStockAt": { "type": "number" },
+        "emoji": { "type": "string" },
+        "tags": { "type": "array" },
+        "desc": { "type": "string" },
+        "img": { "type": "string" },
+        "featured": { "type": "boolean" },
+        "shopRef": { "type": "string" },
+        "shopName": { "type": "string" },
+        "slug": { "type": "string" },
+        "salesCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "archived", "orphaned"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "price", "stock", "shopRef", "shopName"]
+    },
+    "Owner": {
+      "title": "Owner",
+      "description": "A seller registration details with access pin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "pin": { "type": "string" },
+        "salt": { "type": "string" },
+        "secQuestion": { "type": "string" },
+        "secAnswer": { "type": "string" },
+        "refCode": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "phone", "pin"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "An order raised by a local customer.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customer": { "type": "object" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "tax": { "type": "number" },
+        "delivery": { "type": "number" },
+        "total": { "type": "number" },
+        "status": { "type": "string" },
+        "payment": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "customer", "items", "total", "status"]
+    },
+    "Coupon": {
+      "title": "Coupon",
+      "description": "Protional discount coupon valid on the marketplace.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "type": { "type": "string" },
+        "disc": { "type": "number" },
+        "min": { "type": "number" },
+        "maxUses": { "type": "number" },
+        "used": { "type": "number" },
+        "expiry": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["code", "type", "disc", "expiry"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global administration settings configuration.",
+      "type": "object",
+      "properties": {
+        "adminPin": { "type": "string" },
+        "enableChat": { "type": "boolean" },
+        "requireOtp": { "type": "boolean" },
+        "moderateReviews": { "type": "boolean" },
+        "taxRate": { "type": "number" },
+        "delivFee": { "type": "number" },
+        "freeDelivAbove": { "type": "number" },
+        "initialized": { "type": "boolean" }
+      },
+      "required": ["adminPin", "taxRate", "delivFee"]
+    }
+  },
+  "firestore": {
+    "/shops/{shopId}": {
+      "schema": "Shop",
+      "description": "Collection of shops registered in VidishaMart."
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of products available in the marketplace."
+    },
+    "/owners/{ownerId}": {
+      "schema": "Owner",
+      "description": "List of shop owners and sellers registered."
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Orders created by shoppers."
+    },
+    "/coupons/{code}": {
+      "schema": "Coupon",
+      "description": "Active promo coupons on the platform."
+    },
+    "/settings/config": {
+      "schema": "AppSettings",
+      "description": "Global settings for the application."
+    }
+  }
+}

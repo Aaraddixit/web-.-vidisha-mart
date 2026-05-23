@@ -1,0 +1,6 @@
+{
+  "name": "VidishaMart",
+  "description": "Vidisha's trusted local marketplace. Buy from verified local shops, WhatsApp directly, home delivery available.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
