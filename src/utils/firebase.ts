@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { 
   getFirestore, 
   doc, 
@@ -27,6 +27,26 @@ export async function loginWithGoogle() {
     return result.user;
   } catch (error) {
     console.error("Google Auth popup failed:", error);
+    throw error;
+  }
+}
+
+export async function loginWithEmailAndPasswordHelper(email: string, pass: string) {
+  try {
+    const result = await signInWithEmailAndPassword(auth, email, pass);
+    return result.user;
+  } catch (error) {
+    console.error("Email login failed:", error);
+    throw error;
+  }
+}
+
+export async function registerWithEmailAndPasswordHelper(email: string, pass: string) {
+  try {
+    const result = await createUserWithEmailAndPassword(auth, email, pass);
+    return result.user;
+  } catch (error) {
+    console.error("Email registration failed:", error);
     throw error;
   }
 }

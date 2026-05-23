@@ -14,6 +14,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   auth, 
   loginWithGoogle, 
+  loginWithEmailAndPasswordHelper,
+  registerWithEmailAndPasswordHelper,
   logoutUser, 
   testConnection, 
   syncStorageWithFirebase, 
@@ -32,7 +34,14 @@ import {
 } from './utils/firebase';
 
 export default function App() {
-  const [firebaseUser, setFirebaseUser] = useState<any>(null);
+  const [firebaseUser, setFirebaseUser] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('vm_verified_phone_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [firebaseStatus, setFirebaseStatus] = useState<'connected' | 'error' | 'disconnected'>('disconnected');
 
   // --- Persistent Local Database Sheets ---
@@ -98,6 +107,19 @@ export default function App() {
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showPWAInstallGuide, setShowPWAInstallGuide] = useState(false);
+  
+  // Custom Shopper Secure Auth (Google & Phone Verification)
+  const [authRole, setAuthRole] = useState<'customer' | 'seller'>('customer');
+  const [custLoginPhone, setCustLoginPhone] = useState('');
+  const [custLoginName, setCustLoginName] = useState('');
+  const [custOtpInput, setCustOtpInput] = useState('');
+  const [custOtpSent, setCustOtpSent] = useState<string | null>(null);
+  const [custOtpTimer, setCustOtpTimer] = useState(0);
+  const [custOtpError, setCustOtpError] = useState('');
+  const [custLoginEmail, setCustLoginEmail] = useState('');
+  const [custLoginPassword, setCustLoginPassword] = useState('');
+  const [custIsEmailRegister, setCustIsEmailRegister] = useState(false);
+  const [custEmailError, setCustEmailError] = useState('');
 
   const handlePWAInstall = async () => {
     if (deferredPrompt) {
@@ -371,6 +393,19 @@ export default function App() {
       window.removeEventListener('appinstalled', handleAppInstalledEvent);
     };
   }, []);
+
+  // Timer interval for shopper SMS OTP verification code countdown
+  useEffect(() => {
+    let interval: any;
+    if (custOtpTimer > 0) {
+      interval = setInterval(() => {
+        setCustOtpTimer(prev => prev - 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [custOtpTimer]);
 
   // Track recently viewed products on active details switch
   useEffect(() => {
@@ -1399,7 +1434,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Seller Portal Authenticators (orWrap) */}
+      {/* Unified Secure Authentication Portal (For both Shoppers & Sellers) */}
       <AnimatePresence>
         {showAuthOverlay && (
           <motion.div
@@ -1408,7 +1443,7 @@ export default function App() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             className="overlay show"
-            style={{ display: 'flex' }}
+            style={{ display: 'flex', zIndex: 6500 }}
             onClick={() => setShowAuthOverlay(false)}
           >
             <motion.div
@@ -1418,145 +1453,675 @@ export default function App() {
               transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
               className="or-box"
               onClick={e => e.stopPropagation()}
-              style={{ background: '#fff', borderRadius: '18px', padding: '18px', width: '100%', maxWidth: '380px' }}
+              style={{ background: '#ffffff', borderRadius: '20px', padding: '24px', width: '100%', maxWidth: '380px', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)' }}
             >
-              <div className="or-hd">
-                <div style={{ fontSize: '2.2rem', marginBottom: '7px' }}>🏪</div>
-                <h2>Seller Login Hub</h2>
-                <p>Manage store items & catalog variables</p>
-              </div>
-              
-              <div className="tab-row">
-                <button className={`tab-btn ${authTab === 'login' ? 'on' : ''}`} onClick={() => setAuthTab('login')}>Login</button>
-                <button className={`tab-btn ${authTab === 'reg' ? 'on' : ''}`} onClick={() => setAuthTab('reg')}>Register</button>
+              {/* Top Banner & Close Button */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', margin: 0 }}>
+                  🔑 {translate("VidishaMart Login Hub", "विदिशा मार्ट लॉगिन")}
+                </h3>
+                <button 
+                  onClick={() => setShowAuthOverlay(false)}
+                  style={{ background: 'none', border: 'none', fontSize: '24px', color: '#9ca3af', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+                >
+                  &times;
+                </button>
               </div>
 
-              {/* Login form block */}
-              {authTab === 'login' && (
-                <div className="login-form on">
-                  <div className="fg">
-                    <label>Mobile phone number</label>
-                    <input placeholder="10 Digits" val-type="phone" value={olPhone} onChange={e => setOlPhone(e.target.value)} />
+              {/* Unique Role Selection Tabs */}
+              <div style={{ display: 'flex', gap: '8px', background: '#f1f5f9', padding: '4px', borderRadius: '12px', marginBottom: '20px' }}>
+                <button 
+                  onClick={() => setAuthRole('customer')}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    background: authRole === 'customer' ? '#ffffff' : 'transparent',
+                    color: authRole === 'customer' ? '#4f46e5' : '#64748b',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: authRole === 'customer' ? '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)' : 'none'
+                  }}
+                >
+                  🛍️ {translate("I am a Customer", "मैं ग्राहक हूँ")}
+                </button>
+                <button 
+                  onClick={() => setAuthRole('seller')}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    background: authRole === 'seller' ? '#ffffff' : 'transparent',
+                    color: authRole === 'seller' ? '#059669' : '#64748b',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: authRole === 'seller' ? '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)' : 'none'
+                  }}
+                >
+                  🏪 {translate("I am a Seller", "मैं विक्रेता हूँ")}
+                </button>
+              </div>
+
+              {/* ==================== CUSTOMER PORTAL ==================== */}
+              {authRole === 'customer' && (
+                <div>
+                  <p style={{ fontSize: '11.5px', color: '#4b5563', marginBottom: '16px', lineHeight: '1.4' }}>
+                    {translate(
+                      "Authenticate with real email/password, verify using Google, or enter a Mobile Phone for OTP authorization.", 
+                      "असली ईमेल/पासवर्ड से लॉगिन करें, गूगल का उपयोग करें, या मोबाइल नंबर पर प्राप्त ओटीपी कोड के साथ लॉगिन करें।"
+                    )}
+                  </p>
+
+                  {/* Real Firebase Email & Password Form */}
+                  <div style={{ border: '1px solid #cbd5e1', borderRadius: '14px', padding: '16px', background: '#f8fafc', marginBottom: '16px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                    <h4 style={{ fontSize: '12px', fontWeight: 900, margin: '0 0 12px 0', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📨 {custIsEmailRegister ? translate("Create Real Firebase Account", "नया असली खाता बनाएं") : translate("Real Firebase Email Sign-In", "असली ईमेल से लॉगिन करें")}
+                    </h4>
+                    
+                    <div className="fg" style={{ marginBottom: '8px' }}>
+                      <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px', textTransform: 'uppercase', tracking: '0.05em' }}>
+                        {translate("Email Address", "ईमेल पता")}
+                      </label>
+                      <input 
+                        type="email" 
+                        placeholder="yourname@domain.com"
+                        value={custLoginEmail}
+                        onChange={e => {
+                          setCustLoginEmail(e.target.value);
+                          setCustEmailError('');
+                        }}
+                        style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                      />
+                    </div>
+
+                    <div className="fg" style={{ marginBottom: '12px' }}>
+                      <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px', textTransform: 'uppercase', tracking: '0.05em' }}>
+                        {translate("Password", "पासवर्ड")}
+                      </label>
+                      <input 
+                        type="password" 
+                        placeholder={translate("Enter password (min 6 chars)", "पासवर्ड (न्यूनतम 6 अक्षर)")}
+                        value={custLoginPassword}
+                        onChange={e => {
+                          setCustLoginPassword(e.target.value);
+                          setCustEmailError('');
+                        }}
+                        style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                      />
+                    </div>
+
+                    {custEmailError && (
+                      <div style={{ color: '#ef4444', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        ⚠️ <span>{custEmailError}</span>
+                      </div>
+                    )}
+
+                    <button
+                      className="btn-main w-full"
+                      style={{ padding: '10px', fontSize: '11px', fontWeight: '900', background: 'linear-gradient(135deg, #4f46e5, #4338ca)', border: 'none', color: '#fff', borderRadius: '8px', cursor: 'pointer', transition: 'all 0.15s ease' }}
+                      onClick={async () => {
+                        if (!custLoginEmail || !custLoginPassword) {
+                          setCustEmailError(translate("Please fill in both email and password.", "कृपया ईमेल और पासवर्ड दोनों दर्ज करें।"));
+                          return;
+                        }
+                        if (custLoginPassword.length < 6) {
+                          setCustEmailError(translate("Password must be at least 6 characters.", "पासवर्ड कम से कम 6 अक्षरों का होना चाहिए।"));
+                          return;
+                        }
+
+                        try {
+                          let uObj;
+                          if (custIsEmailRegister) {
+                            uObj = await registerWithEmailAndPasswordHelper(custLoginEmail, custLoginPassword);
+                            showToast(translate("Account created! You are registered and logged in successfully.", "पहचान सत्यापित! आप सफलतापूर्वक पंजीकृत और लॉगिन हो चुके हैं।"), 'success');
+                          } else {
+                            uObj = await loginWithEmailAndPasswordHelper(custLoginEmail, custLoginPassword);
+                            showToast(translate("Signed in successfully with real Firebase account!", "असली Firebase अकाउंट के साथ सफलतापूर्वक लॉगिन किया गया!"), 'success');
+                          }
+
+                          if (uObj) {
+                            const customUser = {
+                              uid: uObj.uid,
+                              displayName: uObj.displayName || uObj.email?.split('@')[0] || 'Aarad Dixit Partner',
+                              email: uObj.email,
+                              photoURL: uObj.photoURL || 'https://img.icons8.com/color/96/checked-user-male.png',
+                              phoneNumber: uObj.phoneNumber || '',
+                              isDemo: false
+                            };
+                            localStorage.setItem('vm_verified_phone_user', JSON.stringify(customUser));
+                            setFirebaseUser(customUser);
+                            
+                            // Load credentials
+                            setCoName(customUser.displayName);
+                            setCoPhone(customUser.phoneNumber);
+                            localStorage.setItem('vm_profile_name', customUser.displayName);
+                            localStorage.setItem('vm_profile_phone', customUser.phoneNumber);
+                            
+                            setShowAuthOverlay(false);
+                          }
+                        } catch (err: any) {
+                          console.error("Firebase email auth process failed:", err);
+                          let prettyErrorMessage = err?.message || String(err);
+                          if (err?.code === 'auth/wrong-password') {
+                            prettyErrorMessage = translate("Incorrect password. Please try again.", "गलत पासवर्ड। कृपया पुनः प्रयास करें।");
+                          } else if (err?.code === 'auth/user-not-found') {
+                            prettyErrorMessage = translate("No account found with this email. Please switch to Register mode below.", "इस ईमेल से कोई खाता नहीं मिला। कृपया नीचे 'अकाउंट रजिस्टर करें' चुनें।");
+                          } else if (err?.code === 'auth/email-already-in-use') {
+                            prettyErrorMessage = translate("This email is already registered. Please login instead.", "यह ईमेल पहले से पंजीकृत है। कृपया लॉगिन करें।");
+                          } else if (err?.code === 'auth/invalid-email') {
+                            prettyErrorMessage = translate("Please enter a valid email address.", "कृपया एक वैध ईमेल पता दर्ज करें।");
+                          }
+                          setCustEmailError(prettyErrorMessage);
+                          showToast(translate("Authentication error!", "प्रमाणीकरण त्रुटि!"), 'error');
+                        }
+                      }}
+                    >
+                      {custIsEmailRegister ? translate("REGISTER AND LOGIN SECURELY", "खाता पंजीकृत करें और सुरक्षा से प्रवेश करें") : translate("AUTHENTICATE AND ENTER", "लॉगिन करें और प्रवेश करें")}
+                    </button>
+
+                    <div style={{ marginTop: '12px', textAlign: 'center' }}>
+                      <button
+                        style={{ background: 'none', border: 'none', color: '#4f46e5', textDecoration: 'underline', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', padding: 0 }}
+                        onClick={() => {
+                          setCustIsEmailRegister(!custIsEmailRegister);
+                          setCustEmailError('');
+                        }}
+                      >
+                        {custIsEmailRegister 
+                          ? translate("Already have a Firebase account? Sign In", "पहले से ही ईमेल खाता है? साइन इन करें") 
+                          : translate("Need a real secure account? Register here", "नया असली खाता चाहिए? यहाँ रजिस्टर करें")}
+                      </button>
+                    </div>
                   </div>
-                  <div className="fg">
-                    <label>Secure PIN Code</label>
-                    <input type="password" value={olPin} onChange={e => setOlPin(e.target.value)} maxLength={4} />
+
+                  <div className="flex items-center gap-2 my-4">
+                    <div className="flex-1 h-[1px] bg-slate-200"></div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">{translate("Or Use Google / Alternate Integrations", "या Google / अन्य विकल्प")}</span>
+                    <div className="flex-1 h-[1px] bg-slate-200"></div>
                   </div>
-                  <div className="chk-row">
-                    <input type="checkbox" checked={olRemember} id="remSessLogin" onChange={e => setOlRemember(e.target.checked)} />
-                    <label htmlFor="remSessLogin">Remain signed in</label>
+
+                  {/* Option A: Firebase Google Sign-In */}
+                  <div style={{ marginBottom: '12px' }}>
+                    <button
+                      className="w-full flex items-center justify-center gap-2.5 font-bold py-2.5 px-4 rounded-xl text-xs hover:scale-[1.01] active:scale-[0.99] duration-150 shadow-sm border"
+                      style={{ background: '#ffffff', borderColor: '#cbd5e1', color: '#1f2937', cursor: 'pointer' }}
+                      onClick={async () => {
+                        try {
+                          const u = await loginWithGoogle();
+                          if (u) {
+                            if (u.displayName) {
+                              setCoName(u.displayName);
+                              localStorage.setItem('vm_profile_name', u.displayName);
+                            }
+                            showToast(`Hello ${u.displayName || 'there'}! Signed in with Google.`, 'success');
+                            setShowAuthOverlay(false);
+                          }
+                        } catch (err: any) {
+                          console.error("Popup login error detail:", err);
+                          const isClosed = err?.code === 'auth/popup-closed-by-user' || String(err).includes('popup-closed-by-user');
+                          const isBlocked = err?.code === 'auth/popup-blocked' || String(err).includes('popup-blocked');
+                          
+                          if (isBlocked || isClosed) {
+                            showToast(translate(
+                              "Google login popup was closed/blocked by your browser or iframe security rules. Please use 'Email Sign-In' above for direct standard access, or click 'Open in dynamic window' at frame's top-right to run in a standalone browser tab!", 
+                              "पॉपअप बंद/अवरुद्ध। कृपया सीधे ईमेल पंजीकरण/लॉगिन विकल्प का उपयोग करें, या ब्राउज़र में नये टैब में खोलकर वास्तविक गूगल लॉगिन का उपयोग करें!"
+                            ), 'error');
+                          } else {
+                            showToast(translate("Google Sign-In failed inside preview iframe. Please choose standard Email Authentication!", "गूगल लॉगिन पूर्वावलोकन में विफल रहा। कृपया सुरक्षित ईमेल प्रमाणीकरण का उपयोग करें!"), 'error');
+                          }
+                        }
+                      }}
+                    >
+                      <svg style={{ width: '18px', height: '18px' }} viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.69a5.74 5.74 0 0 1-2.48 3.77v3.13h4.01c2.34-2.16 3.68-5.32 3.68-8.75z"/>
+                        <path fill="#34A853" d="M12 24c3.24 0 5.97-1.08 7.96-2.91l-4.01-3.13c-1.11.74-2.53 1.18-3.95 1.18-3.04 0-5.63-2.06-6.55-4.83H1.31v3.23A12 12 0 0 0 12 24z"/>
+                        <path fill="#FBBC05" d="M5.45 14.31a7.22 7.22 0 0 1 0-4.62V6.46H1.31a12 12 0 0 0 0 11.08l4.14-3.23z"/>
+                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.43-3.43A11.93 11.93 0 0 0 12 0a12 12 0 0 0-10.69 6.46l4.14 3.23c.92-2.77 3.51-4.83 6.55-4.83z"/>
+                      </svg>
+                      <span>{translate("Sign In with Google / Gmail", "गूगल / जीमेल से लॉगिन करें")}</span>
+                    </button>
                   </div>
-                  {loginError && <div style={{ color: 'red', textAlign: 'center', fontSize: '11px', margin: '4px' }}>{loginError}</div>}
-                  <button className="btn-main" onClick={handleLoginOwnerSubmit}>🔓 Unlock Dashboard</button>
-                  <a className="forgot-link text-center mt-2 cursor-pointer block" onClick={() => setAuthTab('forgot')}>Forgot PIN Code?</a>
+
+                  {/* Option B: Sandbox Safe Instant Demo Login Option */}
+                  <div style={{ marginBottom: '16px' }}>
+                    <button
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs hover:scale-[1.01] active:scale-[0.99] duration-150 shadow-sm border"
+                      style={{ background: '#f8fafc', borderColor: '#e2e8f0', color: '#64748b', cursor: 'pointer' }}
+                      onClick={() => {
+                        const randomId = Math.floor(1001 + Math.random() * 8999);
+                        const demoUser = {
+                          uid: `demo_user_${randomId}`,
+                          displayName: `Aarad Dixit (Guest)`,
+                          email: `aaraddixit@gmail.com`,
+                          photoURL: 'https://img.icons8.com/color/96/checked-user-male.png',
+                          phoneNumber: '9999999999',
+                          isDemo: true
+                        };
+                        
+                        localStorage.setItem('vm_verified_phone_user', JSON.stringify(demoUser));
+                        setFirebaseUser(demoUser);
+                        
+                        setCoName(demoUser.displayName);
+                        setCoPhone(demoUser.phoneNumber);
+                        localStorage.setItem('vm_profile_name', demoUser.displayName);
+                        localStorage.setItem('vm_profile_phone', demoUser.phoneNumber);
+                        
+                        showToast(translate("Demo Mode authorized.", "डेमो मोड अधिकृत।"), 'success');
+                        setShowAuthOverlay(false);
+                      }}
+                    >
+                      <span style={{ fontSize: '10.5px' }}>⚡ {translate("Quick Sandbox Play (Demo Mode)", "त्वरित सैंडबॉक्स प्ले (डेमो मोड)")}</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 my-4">
+                    <div className="flex-1 h-[1px] bg-slate-200"></div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">{translate("Or Use Mobile", "या मोबाइल का उपयोग करें")}</span>
+                    <div className="flex-1 h-[1px] bg-slate-200"></div>
+                  </div>
+
+                  {/* Option B: Mobile Phone Verification */}
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', background: '#fafafa' }}>
+                    <h4 style={{ fontSize: '12px', fontWeight: 800, margin: '0 0 10px 0', color: '#1f2937' }}>
+                      📱 {translate("Enter Phone Number", "मोबाइल नंबर दर्ज करें")}
+                    </h4>
+
+                    <div className="fg" style={{ marginBottom: '12px' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <span style={{ background: '#e2e8f0', color: '#334155', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', fontWeight: 700, border: '1px solid #cbd5e1' }}>+91</span>
+                        <input 
+                          type="tel" 
+                          maxLength={10} 
+                          placeholder="e.g. 9812345678" 
+                          value={custLoginPhone} 
+                          onChange={e => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            setCustLoginPhone(val);
+                          }}
+                          style={{ padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', fontWeight: 600, letterSpacing: '1px', backgroundColor: '#ffffff', color: '#0f172a' }}
+                          className="placeholder:text-gray-400 focus:border-indigo-500 text-slate-900 bg-white dark:bg-white dark:text-slate-900"
+                        />
+                      </div>
+                    </div>
+
+                    {custOtpSent && (
+                      <motion.div 
+                        initial={{ opacity: 0, height: 0 }} 
+                        animate={{ opacity: 1, height: 'auto' }} 
+                        style={{ background: '#f5f3ff', border: '1px solid #c084fc', padding: '12px', borderRadius: '10px', marginBottom: '12.5px' }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '10px', color: '#6b21a8', fontWeight: 800 }}>💬 {translate("SMS Code simulator", "एसएमएस गेटवे सिम्युलेटर")}</span>
+                          <span style={{ fontSize: '9px', background: '#d8b4fe', color: '#6b21a8', padding: '1px 5px', borderRadius: '10px', fontWeight: 800 }}>✔ SENT</span>
+                        </div>
+                        <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#581c87', lineHeight: '1.4' }}>
+                          {translate("VidishaMart Code:", "ओटीपी कोड:")} <strong style={{ fontSize: '13px', background: '#ffffff', color: '#111827', padding: '1px 5px', borderRadius: '4px', letterSpacing: '1px', border: '1px solid #d8b4fe' }}>{custOtpSent}</strong>
+                        </p>
+                        
+                        <div className="fg" style={{ margin: '0 0 4px 0' }}>
+                          <input 
+                            type="text" 
+                            maxLength={6} 
+                            placeholder="Type 6 digit OTP..." 
+                            value={custOtpInput} 
+                            onChange={e => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setCustOtpInput(val);
+                            }}
+                            style={{ padding: '6px', borderRadius: '6px', border: '1px solid #c084fc', fontSize: '13px', width: '100%', outline: 'none', textAlign: 'center', fontWeight: 'bold', letterSpacing: '2px', backgroundColor: '#ffffff', color: '#0f172a' }}
+                            className="placeholder:text-purple-400 text-slate-900 bg-white dark:bg-white dark:text-slate-900"
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {custOtpError && <div style={{ color: '#dc2626', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px', textAlign: 'center' }}>❌ {custOtpError}</div>}
+
+                    {!custOtpSent ? (
+                      <button
+                        className="w-full btn-main text-xs font-bold py-2.5 shadow-md flex items-center justify-center gap-1.5"
+                        style={{ background: 'linear-gradient(135deg, #4f46e5, #4338ca)', border: 'none', cursor: 'pointer' }}
+                        onClick={() => {
+                          if (!custLoginPhone || custLoginPhone.length !== 10) {
+                            setCustOtpError(translate("Please enter a valid 10-digit mobile number.", "कृपया १० अंकों का सही मोबाइल नंबर दर्ज करें।"));
+                            return;
+                          }
+                          setCustOtpError('');
+                          const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+                          setCustOtpSent(randomCode);
+                          setCustOtpTimer(60);
+                          showToast(translate("SMS Verification OTP sent successfully!", "सत्यापन कोड भेजा गया!"), 'success');
+                        }}
+                      >
+                        🚀 {translate("Send OTP & Log In", "ओटीपी भेजें और लॉगिन करें")}
+                      </button>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <button
+                          className="w-full btn-main text-xs font-bold py-2.5 shadow-md"
+                          style={{ background: '#10b981', border: 'none', cursor: 'pointer' }}
+                          onClick={() => {
+                            if (!custOtpInput || custOtpInput.length !== 6) {
+                              setCustOtpError(translate("Please enter a 6-digit verification code.", "कृपया ६ अंकों का सत्यापन कोड दर्ज करें।"));
+                              return;
+                            }
+                            if (custOtpInput !== custOtpSent) {
+                              setCustOtpError(translate("Incorrect OTP code.", "गलत ओटीपी कोड।"));
+                              return;
+                            }
+                            
+                            setCustOtpError('');
+                            const finalName = `Shopper ${custLoginPhone.substring(6)}`;
+                            const mockUser = {
+                              uid: 'phone_' + custLoginPhone,
+                              displayName: finalName,
+                              phoneNumber: custLoginPhone,
+                              email: `phone_${custLoginPhone}@vidishamart.local`,
+                              photoURL: 'https://img.icons8.com/color/96/checked-user-male.png',
+                              isPhoneVerified: true
+                            };
+                            
+                            localStorage.setItem('vm_verified_phone_user', JSON.stringify(mockUser));
+                            setFirebaseUser(mockUser);
+                            
+                            // Pre-fill orders lookups & tracking automatic credentials
+                            setCoName(finalName);
+                            setCoPhone(custLoginPhone);
+                            localStorage.setItem('vm_profile_name', finalName);
+                            localStorage.setItem('vm_profile_phone', custLoginPhone);
+                            
+                            // Reset states
+                            setCustOtpInput('');
+                            setCustOtpSent(null);
+                            setCustLoginPhone('');
+                            
+                            showToast(translate(`Signed in successfully!`, `सफलतापूर्वक लॉगिन किया गया!`), 'success');
+                            setShowAuthOverlay(false);
+                          }}
+                        >
+                          ✓ {translate("Confirm Code", "ओटीपी सत्यापित करें")}
+                        </button>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', color: '#4b5563', padding: '2px 4px' }}>
+                          <span>
+                            {custOtpTimer > 0 ? (
+                              <span>Resend in <strong>{custOtpTimer}s</strong></span>
+                            ) : (
+                              <button 
+                                style={{ background: 'none', border: 'none', color: '#6366f1', fontWeight: 'bold', textDecoration: 'underline', padding: 0, cursor: 'pointer' }}
+                                onClick={() => {
+                                  const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+                                  setCustOtpInput('');
+                                  setCustOtpSent(randomCode);
+                                  setCustOtpTimer(60);
+                                  setCustOtpError('');
+                                  showToast(translate("New verification OTP dispatched!", "नया सत्यापन कोड भेजा गया!"), 'info');
+                                }}
+                              >
+                                Resend SMS
+                              </button>
+                            )}
+                          </span>
+                          
+                          <button 
+                            style={{ background: 'none', border: 'none', color: '#64748b', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+                            onClick={() => {
+                              setCustOtpSent(null);
+                              setCustOtpInput('');
+                              setCustOtpError('');
+                            }}
+                          >
+                            Change Phone
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
-              {/* Registry form block */}
-              {authTab === 'reg' && (
-                <div className="reg-form on">
-                  <div className="fg">
-                    <label>Representative Name</label>
-                    <input placeholder="Suresh Lal Sahu" value={orName} onChange={e => setOrName(e.target.value)} />
+              {/* ==================== SELLER PORTAL ==================== */}
+              {authRole === 'seller' && (
+                <div>
+                  <div className="tab-row" style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                    <button 
+                      className={`tab-btn ${authTab === 'login' ? 'on' : ''}`} 
+                      onClick={() => setAuthTab('login')}
+                      style={{ flex: 1, padding: '6px', fontSize: '11px', background: authTab === 'login' ? '#f1f5f9' : 'transparent', border: 'none', borderRadius: '6px', fontWeight: authTab === 'login' ? 'bold' : 'normal', cursor: 'pointer' }}
+                    >
+                      Login
+                    </button>
+                    <button 
+                      className={`tab-btn ${authTab === 'reg' ? 'on' : ''}`} 
+                      onClick={() => setAuthTab('reg')}
+                      style={{ flex: 1, padding: '6px', fontSize: '11px', background: authTab === 'reg' ? '#f1f5f9' : 'transparent', border: 'none', borderRadius: '6px', fontWeight: authTab === 'reg' ? 'bold' : 'normal', cursor: 'pointer' }}
+                    >
+                      Register
+                    </button>
                   </div>
-                  <div className="fg">
-                    <label>Mobile Phone *</label>
-                    <input placeholder="10 Digits" value={orPhone} onChange={e => setOrPhone(e.target.value)} />
-                  </div>
-                  <div className="fg">
-                    <label>Email Profile</label>
-                    <input placeholder="optional" value={orEmail} onChange={e => setOrEmail(e.target.value)} />
-                  </div>
-                  <div className="fg">
-                    <label>PIN Code *</label>
-                    <input type="password" maxLength={4} value={orPin} onChange={e => setOrPin(e.target.value)} />
-                  </div>
-                  <div className="fg">
-                    <label>Confirm PIN *</label>
-                    <input type="password" maxLength={4} value={orPin2} onChange={e => setOrPin2(e.target.value)} />
-                  </div>
-                  <div className="fg">
-                    <label>Recovery Hint Question</label>
-                    <select value={orSecQ} onChange={e => setOrSecQ(e.target.value)}>
-                      <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
-                      <option value="What was your first pet's name?">What was your first pet's name?</option>
-                      <option value="What city were you born in?">What city were you born in?</option>
-                      <option value="What is your favourite food?">What is your favourite food?</option>
-                    </select>
-                  </div>
-                  <div className="fg">
-                    <label>Hint Answer</label>
-                    <input placeholder="Secret answers..." value={orSecA} onChange={e => setOrSecA(e.target.value)} />
-                  </div>
-                  <div className="fg">
-                    <label>Promo Referral Code (Optional)</label>
-                    <input placeholder="friend reference..." value={orRefCode} onChange={e => setOrRefCode(e.target.value)} />
-                  </div>
-                  <div className="chk-row">
-                    <input type="checkbox" checked={orAgree} id="agreeCheckReg" onChange={e => setOrAgree(e.target.checked)} />
-                    <label htmlFor="agreeCheckReg">Agree to <span className="underline cursor-pointer" onClick={() => setShowPrivacyModal(true)}>Terms and privacy</span></label>
-                  </div>
-                  {regError && <div style={{ color: 'red', fontSize: '11px', textAlign: 'center', margin: '4px' }}>{regError}</div>}
-                  <button className="btn-main" onClick={handleRegOwnerSubmit}>🚀 Create merchant portfolio</button>
-                </div>
-              )}
 
-              {/* Recovery Question forms */}
-              {authTab === 'forgot' && (
-                <div className="forgot-form on">
-                  <div className="fg">
-                    <label>Mobile Number</label>
-                    <input placeholder="10 Digits" value={fgPhone} onChange={e => setFgPhone(e.target.value)} />
-                  </div>
-                  {fgShowQuestion && (
-                    <div className="animate-fadeIn">
-                      <p style={{ fontSize: '12px', background: '#f0f4ff', padding: '10px', borderRadius: '8px', color: '#1a1a2e', marginBottom: '8px' }}>
-                        <strong>Recovery Hint:</strong> {fgQuestion}
-                      </p>
+                  {/* Login form block */}
+                  {authTab === 'login' && (
+                    <div className="login-form on">
+                      <div className="fg" style={{ marginBottom: '10px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Mobile phone number</label>
+                        <input 
+                          placeholder="10 Digits" 
+                          val-type="phone" 
+                          value={olPhone} 
+                          onChange={e => setOlPhone(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      <div className="fg" style={{ marginBottom: '10px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Secure PIN Code</label>
+                        <input 
+                          type="password" 
+                          value={olPin} 
+                          onChange={e => setOlPin(e.target.value)} 
+                          maxLength={4} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      <div className="chk-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
+                        <input type="checkbox" checked={olRemember} id="remSessLogin" onChange={e => setOlRemember(e.target.checked)} />
+                        <label htmlFor="remSessLogin" style={{ fontSize: '12px', color: '#4b5563' }}>Remain signed in</label>
+                      </div>
+                      {loginError && <div style={{ color: 'red', textAlign: 'center', fontSize: '11px', margin: '4px' }}>{loginError}</div>}
+                      <button className="btn-main" onClick={handleLoginOwnerSubmit} style={{ cursor: 'pointer', outline: 'none' }}>🔓 Unlock Dashboard</button>
+                      <a className="forgot-link text-center mt-2 cursor-pointer block" onClick={() => setAuthTab('forgot')} style={{ fontSize: '11px', color: '#4f46e5', textDecoration: 'underline' }}>Forgot PIN Code?</a>
+                    </div>
+                  )}
+
+                  {/* Registry form block */}
+                  {authTab === 'reg' && (
+                    <div className="reg-form on" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflowY: 'auto', paddingRight: '4px' }}>
                       <div className="fg">
-                        <label>Secret Answer</label>
-                        <input placeholder="hints secret answer..." value={fgAnswer} onChange={e => setFgAnswer(e.target.value)} />
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Representative Name</label>
+                        <input 
+                          placeholder="Suresh Lal Sahu" 
+                          value={orName} 
+                          onChange={e => setOrName(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
                       </div>
                       <div className="fg">
-                        <label>New PIN Code</label>
-                        <input type="password" value={fgNewPin} onChange={e => setFgNewPin(e.target.value)} maxLength={4} />
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Mobile Phone *</label>
+                        <input 
+                          placeholder="10 Digits" 
+                          value={orPhone} 
+                          onChange={e => setOrPhone(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
                       </div>
                       <div className="fg">
-                        <label>Confirm PIN Code</label>
-                        <input type="password" value={fgCfPin} onChange={e => setFgCfPin(e.target.value)} maxLength={4} />
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Email Profile</label>
+                        <input 
+                          placeholder="optional" 
+                          value={orEmail} 
+                          onChange={e => setOrEmail(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      <div className="fg">
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>PIN Code *</label>
+                        <input 
+                          type="password" 
+                          maxLength={4} 
+                          value={orPin} 
+                          onChange={e => setOrPin(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      <div className="fg">
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Confirm PIN *</label>
+                        <input 
+                          type="password" 
+                          maxLength={4} 
+                          value={orPin2} 
+                          onChange={e => setOrPin2(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      <div className="fg">
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Recovery Hint Question</label>
+                        <select 
+                          value={orSecQ} 
+                          onChange={e => setOrSecQ(e.target.value)}
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        >
+                          <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
+                          <option value="What was your first pet's name?">What was your first pet's name?</option>
+                          <option value="What city were you born in?">What city were you born in?</option>
+                          <option value="What is your favourite food?">What is your favourite food?</option>
+                        </select>
+                      </div>
+                      <div className="fg">
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Hint Answer</label>
+                        <input 
+                          placeholder="Secret answers..." 
+                          value={orSecA} 
+                          onChange={e => setOrSecA(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      <div className="fg">
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Promo Referral Code (Optional)</label>
+                        <input 
+                          placeholder="friend reference..." 
+                          value={orRefCode} 
+                          onChange={e => setOrRefCode(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      <div className="chk-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '4px 0' }}>
+                        <input type="checkbox" checked={orAgree} id="agreeCheckReg" onChange={e => setOrAgree(e.target.checked)} />
+                        <label htmlFor="agreeCheckReg" style={{ fontSize: '12px' }}>Agree to <span className="underline cursor-pointer" onClick={() => setShowPrivacyModal(true)}>Terms & Privacy</span></label>
+                      </div>
+                      {regError && <div style={{ color: 'red', fontSize: '11px', textAlign: 'center', margin: '4px' }}>{regError}</div>}
+                      <button className="btn-main" onClick={handleRegOwnerSubmit} style={{ cursor: 'pointer' }}>🚀 Create merchant portfolio</button>
+                    </div>
+                  )}
+
+                  {/* Recovery Question forms */}
+                  {authTab === 'forgot' && (
+                    <div className="forgot-form on">
+                      <div className="fg" style={{ marginBottom: '10px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Mobile Number</label>
+                        <input 
+                          placeholder="10 Digits" 
+                          value={fgPhone} 
+                          onChange={e => setFgPhone(e.target.value)} 
+                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                        />
+                      </div>
+                      {fgShowQuestion && (
+                        <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
+                          <p style={{ fontSize: '12px', background: '#f0f4ff', padding: '10px', borderRadius: '8px', color: '#1a1a2e', margin: 0 }}>
+                            <strong>Recovery Hint:</strong> {fgQuestion}
+                          </p>
+                          <div className="fg">
+                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Secret Answer</label>
+                            <input 
+                              placeholder="hints secret answer..." 
+                              value={fgAnswer} 
+                              onChange={e => setFgAnswer(e.target.value)} 
+                              style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                            />
+                          </div>
+                          <div className="fg">
+                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>New PIN Code</label>
+                            <input 
+                              type="password" 
+                              value={fgNewPin} 
+                              onChange={e => setFgNewPin(e.target.value)} 
+                              maxLength={4} 
+                              style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                            />
+                          </div>
+                          <div className="fg">
+                            <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Confirm PIN Code</label>
+                            <input 
+                              type="password" 
+                              value={fgCfPin} 
+                              onChange={e => setFgCfPin(e.target.value)} 
+                              maxLength={4} 
+                              style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {fgError && <div style={{ color: 'red', fontSize: '11px', textAlign: 'center', margin: '4px' }}>{fgError}</div>}
+                      <button className="btn-main text-bold" onClick={handleFindForgotAccount} style={{ cursor: 'pointer' }}>
+                        {fgShowQuestion ? 'Reset PIN Code' : 'Find Account'}
+                      </button>
+                      <div className="text-center mt-2">
+                        <a className="forgot-link" onClick={() => { setAuthTab('login'); setFgShowQuestion(false); setFgError(''); }} style={{ fontSize: '11px', cursor: 'pointer', textDecoration: 'underline', color: '#4f46e5' }}>← Back to login</a>
                       </div>
                     </div>
                   )}
-                  {fgError && <div style={{ color: 'red', fontSize: '11px', textAlign: 'center', margin: '4px' }}>{fgError}</div>}
-                  <button className="btn-main text-bold" onClick={handleFindForgotAccount}>
-                    {fgShowQuestion ? 'Reset PIN Code' : 'Find Account'}
-                  </button>
-                  <div className="text-center mt-2">
-                    <a className="forgot-link" onClick={() => { setAuthTab('login'); setFgShowQuestion(false); setFgError(''); }}>← Back to login</a>
-                  </div>
+
+                  {/* OTP DEMO */}
+                  {authTab === 'otp' && (
+                    <div className="otp-form on">
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '2rem' }}>📱</div>
+                        <h3>Enter verification Code</h3>
+                        <div className="otp-box mt-2" style={{ background: '#f8fafc', padding: '12px', borderRadius: '10px', marginBottom: '10px' }}>
+                          <p style={{ fontSize: '11px', color: '#64748b', margin: '0 0 4px 0' }}>OTP Simulator Code:</p>
+                          <h2 className="otp-code text-bold" style={{ fontSize: '26px', margin: 0, color: '#4f46e5', letterSpacing: '2px' }}>{otpSentCode}</h2>
+                        </div>
+                        <div className="fg" style={{ marginBottom: '12px' }}>
+                          <input 
+                            placeholder="Type code from box..." 
+                            value={otpInputCode} 
+                            onChange={e => setOtpInputCode(e.target.value)} 
+                            style={{ textAlign: 'center', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', width: '100%', outline: 'none', backgroundColor: '#ffffff', color: '#111827', fontWeight: 'bold' }} 
+                          />
+                        </div>
+                        {otpError && <div style={{ color: 'red', fontSize: '11px' }}>{otpError}</div>}
+                        <button className="btn-main" onClick={handleVerifyOtpSubmit} style={{ cursor: 'pointer' }}>✓ Verify Code</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* OTP DEMO */}
-              {authTab === 'otp' && (
-                <div className="otp-form on">
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '2rem' }}>📱</div>
-                    <h3>Enter verification Code</h3>
-                    <div className="otp-box mt-2">
-                      <p style={{ fontSize: '11px', color: '#666' }}>OTP Simulator Code:</p>
-                      <h2 className="otp-code text-bold" style={{ fontSize: '26px' }}>{otpSentCode}</h2>
-                    </div>
-                    <div className="fg">
-                      <input placeholder="Type code from box..." value={otpInputCode} onChange={e => setOtpInputCode(e.target.value)} style={{ textAlign: 'center' }} />
-                    </div>
-                    {otpError && <div style={{ color: 'red', fontSize: '11px' }}>{otpError}</div>}
-                    <button className="btn-main" onClick={handleVerifyOtpSubmit}>✓ Verify Code</button>
-                  </div>
-                </div>
-              )}
-
-              <button onClick={() => setShowAuthOverlay(false)} style={{ width: '100%', background: 'none', border: 'none', color: '#999', padding: '12px', cursor: 'pointer', fontSize: '12px', marginTop: '6px' }}>Cancel</button>
+              {/* Close Button / Bottom spacing */}
+              <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+                <button 
+                  style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', padding: '6px' }}
+                  onClick={() => setShowAuthOverlay(false)}
+                >
+                  {translate("Close Portal", "बंद करें")}
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
@@ -1726,11 +2291,12 @@ export default function App() {
               ) : (
                 <span>👤</span>
               )}
-              <span className="max-w-[124px] truncate font-semibold">{firebaseUser.displayName || firebaseUser.email}</span>
+              <span className="max-w-[124px] truncate font-semibold">{firebaseUser.displayName || firebaseUser.email || (firebaseUser.phoneNumber ? `📞 ${firebaseUser.phoneNumber}` : 'Online Shopper')}</span>
               {firebaseUser.email === 'aaraddixit@gmail.com' && (
                 <button 
                   className="ml-1 px-2.5 py-1 text-[10px] uppercase font-extrabold rounded-full bg-red-600 text-white hover:bg-red-700 transition"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setShowAdminPanel(true);
                     showToast('Welcome inside core control, Aarad Dixit! 🛡️', 'success');
                   }}
@@ -1739,12 +2305,15 @@ export default function App() {
                 </button>
               )}
               <button 
-                onClick={async () => {
+                onClick={async (e) => {
+                  e.stopPropagation();
                   await logoutUser();
-                  showToast('Signed out from Firebase', 'info');
+                  localStorage.removeItem('vm_verified_phone_user');
+                  setFirebaseUser(null);
+                  showToast(translate('Signed out successfully! 👋', 'सफलतापूर्वक साइन आउट किया गया! 👋'), 'info');
                 }}
                 className="ml-1 text-red-500 hover:text-red-700 font-bold text-sm"
-                title="Google Sign Out"
+                title="Sign Out"
                 style={{ background: 'none', border: 'none', cursor: 'pointer' }}
               >
                 ✕
@@ -1752,36 +2321,13 @@ export default function App() {
             </div>
           ) : (
             <button 
-              className="px-4 py-1.5 text-xs rounded-full bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
-              onClick={async () => {
-                try {
-                  const u = await loginWithGoogle();
-                  showToast(`Hello ${u?.displayName || 'there'}! Signed in with Google.`, 'success');
-                } catch (err: any) {
-                  console.error("Popup login error detail:", err);
-                  const isClosed = err?.code === 'auth/popup-closed-by-user' || String(err).includes('popup-closed-by-user');
-                  const isBlocked = err?.code === 'auth/popup-blocked' || String(err).includes('popup-blocked');
-                  
-                  if (isClosed) {
-                    showToast(translate(
-                      'Sign-in window closed by user before completing login.', 
-                      'साइन-इन विंडो उपयोगकर्ता द्वारा बिना लॉगिन पूरा किए बंद कर दी गई।'
-                    ), 'warn');
-                  } else if (isBlocked) {
-                    showToast(translate(
-                      'Login popup blocked. Please allow popups or open this app in a new tab.', 
-                      'लॉगिन पॉपअप ब्लॉक। कृपया पॉपअप की अनुमति दें या ऐप को नए टैब में खोलें।'
-                    ), 'error');
-                  } else {
-                    showToast(translate(
-                      'Google Sign-In failed. Please open the app in a new tab to bypass preview iframe limits.', 
-                      'गूगल साइन-इन विफल रहा। पूर्वावलोकन सीमाओं से बचने के लिए कृपया ऐप को नए टैब में खोलें।'
-                    ), 'error');
-                  }
-                }
+              className="px-4 py-1.5 text-xs rounded-full bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition flex items-center gap-1.5 shadow-sm hover:scale-105 active:scale-95 duration-150"
+              onClick={() => {
+                setAuthRole('customer');
+                setShowAuthOverlay(true);
               }}
             >
-              Sign In with Google
+              🔑 {translate("Sign In / Verify Phone", "साइन इन / फोन सत्यापित करें")}
             </button>
           )}
         </div>
@@ -3796,12 +4342,29 @@ export default function App() {
                       <span style={{ fontSize: '1.5rem' }}>👤</span>
                       <div>
                         <h4 style={{ fontWeight: 800, fontSize: '13px', color: 'var(--dark)' }}>{translate("Welcome Guest Shopper", "अतिथि खरीदार")}</h4>
-                        <button 
-                          style={{ background: 'none', border: 'none', color: 'var(--p)', padding: 0, textDecoration: 'underline', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
-                          onClick={() => { setShowSidebar(false); setShowAuthOverlay(true); }}
-                        >
-                          🔑 Login / Onboard
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+                          <button 
+                            style={{ background: 'none', border: 'none', color: 'var(--p)', padding: 0, textDecoration: 'underline', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
+                            onClick={() => {
+                              setShowSidebar(false);
+                              setAuthRole('customer');
+                              setShowAuthOverlay(true);
+                            }}
+                          >
+                            🔑 {translate("Sign In", "साइन इन")}
+                          </button>
+                          <span style={{ color: '#ccc', fontSize: '11px' }}>|</span>
+                          <button 
+                            style={{ background: 'none', border: 'none', color: '#666', padding: 0, textDecoration: 'underline', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
+                            onClick={() => {
+                              setShowSidebar(false);
+                              setAuthRole('seller');
+                              setShowAuthOverlay(true);
+                            }}
+                          >
+                            🏪 {translate("Seller Login", "विक्रेता")}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -3859,91 +4422,13 @@ export default function App() {
                     >
                       <span>❤️</span> {translate("My Wishlist", "पसंदीदा सूची")}
                     </div>
-                    <div 
-                      className="sidebar-nav-item"
-                      onClick={() => { setShowSidebar(false); setShowCartModal(true); }}
-                    >
-                      <span>🛒</span> {translate("My Basket", "मेरी टोकरी")} ({cart.reduce((acc, curr) => acc + curr.qty, 0)})
-                    </div>
-                    <div 
-                      className={`sidebar-nav-item ${currentView === 'orders' ? 'active' : ''}`}
-                      onClick={() => { setCurrentView('orders'); setShowSidebar(false); }}
-                    >
-                      <span>📦</span> {translate("Track Orders", "ऑर्डर ट्रैक करें")}
-                    </div>
-                    <div 
-                      className={`sidebar-nav-item ${currentView === 'owner' ? 'active' : ''}`}
-                      onClick={() => { 
-                        setShowSidebar(false); 
-                        if (sess) { setCurrentView('owner'); } else { setShowAuthOverlay(true); } 
-                      }}
-                    >
-                      <span>⚙️</span> {translate("Seller Console", "विक्रेता पैनल")}
-                    </div>
                   </div>
                 </div>
 
-                {/* Shop by Niche Category select triggers */}
-                <div>
-                  <div className="sidebar-label">{translate("Shop by Category", "श्रेणी अनुसार खरीदें")}</div>
-                  <div className="sidebar-cats-grid">
-                    {[
-                      '💻 Electronics',
-                      '👕 Fashion',
-                      '🍏 Grocery',
-                      '📱 Mobiles',
-                      '📚 Books',
-                      '📺 Home Appliances',
-                      '💄 Beauty',
-                      '⚽ Sports'
-                    ].map(c => (
-                      <div 
-                        key={c}
-                        className={`sidebar-cat-pill ${selectedCategory === c ? 'active' : ''}`}
-                        onClick={() => {
-                          setSelectedCategory(c);
-                          setCurrentView('market');
-                          setShowSidebar(false);
-                          showToast(`Filtered by ${c}`, 'info');
-                        }}
-                      >
-                        <span>{c.split(' ')[0]}</span>
-                        <span>{c.replace(/^\S+\s/, '')}</span>
-                      </div>
-                    ))}
-                    {selectedCategory && (
-                      <div 
-                        className="sidebar-cat-pill"
-                        style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' }}
-                        onClick={() => {
-                          setSelectedCategory('');
-                          setCurrentView('market');
-                          setShowSidebar(false);
-                        }}
-                      >
-                        <span>❌</span>
-                        <span>{translate("Reset Filters", "फ़िल्टर साफ़ करें")}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Dynamic Preferences triggers inside sidebar */}
-                <div style={{ marginTop: 'auto', paddingTop: '15px', borderTop: '1px solid var(--border)' }}>
-                  <div className="sidebar-label">{translate("Preferences", "प्राथमिकताएं")}</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <button 
-                      className="btn-add" 
-                      style={{ fontSize: '11px', padding: '6px' }}
-                      onClick={() => {
-                        const nextTheme = theme === 'light' ? 'dark' : 'light';
-                        setTheme(nextTheme);
-                        document.documentElement.setAttribute('data-theme', nextTheme);
-                        StorageEngine.save('theme', nextTheme);
-                      }}
-                    >
-                      {theme === 'light' ? '🌙 Dark' : '☀️ Light'}
-                    </button>
+                {/* Select Language Panel inside the sidebar body */}
+                <div style={{ marginTop: '16px' }}>
+                  <div className="sidebar-label">{translate("Select Language", "भाषा चुनें")}</div>
+                  <div style={{ display: 'flex', gap: '8px', padding: '0 8px' }}>
                     <button 
                       className="btn-add" 
                       style={{ fontSize: '11px', padding: '6px' }}
