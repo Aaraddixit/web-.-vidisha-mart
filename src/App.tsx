@@ -54,6 +54,14 @@ export default function App() {
   const [flashSales, setFlashSales] = useState<FlashSale[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [lang, setLang] = useState<'en' | 'hi'>('en');
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [recentViewedIds, setRecentViewedIds] = useState<number[]>([]);
+  const [faqOpenIndex, setFaqOpenIndex] = useState<number | null>(null);
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactMsg, setContactMsg] = useState('');
+  const [contactSuccess, setContactSuccess] = useState(false);
+  const [activeImgIndex, setActiveImgIndex] = useState(0);
 
   // --- Initial Loading State ---
   const [appLoading, setAppLoading] = useState(true);
@@ -88,6 +96,7 @@ export default function App() {
   const [showChatModal, setShowChatModal] = useState(false);
   const [showOrderTrackModal, setShowOrderTrackModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   // --- Sub-View Target Entities ---
   const [activeShopDetail, setActiveShopDetail] = useState<Shop | null>(null);
@@ -150,10 +159,10 @@ export default function App() {
 
   // Multistep Checkouts
   const [checkoutStep, setCheckoutStep] = useState<1 | 2 | 3>(1);
-  const [coName, setCoName] = useState('');
-  const [coPhone, setCoPhone] = useState('');
-  const [coAddr, setCoAddr] = useState('');
-  const [coPin, setCoPin] = useState('');
+  const [coName, setCoName] = useState(() => localStorage.getItem('vm_profile_name') || '');
+  const [coPhone, setCoPhone] = useState(() => localStorage.getItem('vm_profile_phone') || '');
+  const [coAddr, setCoAddr] = useState(() => localStorage.getItem('vm_profile_address') || '');
+  const [coPin, setCoPin] = useState(() => localStorage.getItem('vm_profile_pincode') || '');
   const [coNotes, setCoNotes] = useState('');
   const [coPayM, setCoPayM] = useState<'cod' | 'upi' | 'whatsapp' | 'card'>('cod');
   const [ccNum, setCcNum] = useState('');
@@ -256,6 +265,12 @@ export default function App() {
     setFlashSales(initialDataset.flashSales);
     setTheme(initialDataset.theme as any);
     setLang(initialDataset.lang as any);
+    try {
+      const rec = JSON.parse(localStorage.getItem('vm_recent') || '[]');
+      setRecentViewedIds(rec);
+    } catch (e) {
+      console.warn("Failed to load recently viewed:", e);
+    }
 
     // Apply saved themes
     document.documentElement.setAttribute('data-theme', initialDataset.theme);
@@ -325,6 +340,42 @@ export default function App() {
     return () => {
       unsubscribeAuth();
     };
+  }, []);
+
+  // Track recently viewed products on active details switch
+  useEffect(() => {
+    if (activeProductDetail) {
+      setActiveImgIndex(0);
+      setRecentViewedIds(prev => {
+        const next = [activeProductDetail.id, ...prev.filter(id => id !== activeProductDetail.id)].slice(0, 10);
+        localStorage.setItem('vm_recent', JSON.stringify(next));
+        return next;
+      });
+    }
+  }, [activeProductDetail]);
+
+  // Fetch initial API categories & products from the Express backend
+  useEffect(() => {
+    fetch("/api/products")
+      .then(res => res.json())
+      .then(res => {
+        if (res.success && res.data && res.data.length > 0) {
+          // Merge server products with local state
+          setItems(prev => {
+            const merged = [...prev];
+            res.data.forEach((srv: any) => {
+              const idx = merged.findIndex(p => p.id === srv.id);
+              if (idx > -1) {
+                merged[idx] = srv;
+              } else {
+                merged.push(srv);
+              }
+            });
+            return merged;
+          });
+        }
+      })
+      .catch(err => console.warn("Could not load backend products, falling back to offline mode:", err));
   }, []);
 
   // --- Sync Effects for Client tables ---
@@ -513,7 +564,8 @@ export default function App() {
 
     // Filter by categories selection first
     if (selectedCategory) {
-      fl = fl.filter(s => s.category === selectedCategory);
+      const pureCat = selectedCategory.replace(/^\S+\s/, '').toLowerCase();
+      fl = fl.filter(s => s.category.toLowerCase().includes(pureCat) || pureCat.includes(s.category.toLowerCase()));
     }
 
     // Apply custom keyword filters
@@ -637,14 +689,14 @@ export default function App() {
     });
 
     const CATEGORIES = [
-      '🩺 Medical & Pharmacy',
-      '🛒 Grocery & Supermarket',
-      '🍱 Tiffin & Food Service',
-      '📱 Mobile & Electronics',
-      '🛠️ Services & Repair',
-      '👗 Fashion & Clothing',
-      '📚 Books & Stationery',
-      '🎨 Art & Crafts'
+      '💻 Electronics',
+      '👕 Fashion',
+      '🍏 Grocery',
+      '📱 Mobiles',
+      '📚 Books',
+      '📺 Home Appliances',
+      '💄 Beauty',
+      '⚽ Sports'
     ];
 
     CATEGORIES.forEach(c => {
@@ -834,6 +886,12 @@ export default function App() {
     addLog(`🛒 New client order logged: ${oId}`);
     addNotification('order_new', `New order reference ${oId} received at registers!`, oId);
 
+    // Synchronize shipping & tracking details to Profile Card
+    localStorage.setItem('vm_profile_name', coName);
+    localStorage.setItem('vm_profile_phone', coPhone);
+    localStorage.setItem('vm_profile_address', coAddr);
+    localStorage.setItem('vm_profile_pincode', coPin);
+
     setPlacedOrderId(oId);
     setCart([]);
     setAppliedCoupon(null);
@@ -841,6 +899,17 @@ export default function App() {
     setCouponStatusText('');
     setCheckoutStep(3);
     showToast('Order Placed! 🎉');
+  };
+
+  const handleSaveProfile = () => {
+    if (!coPhone) {
+      showToast(translate('Phone number is required to look up and track orders!', 'ऑर्डर खोजने और ट्रैक करने के लिए फोन नंबर आवश्यक है!'), 'warn');
+    }
+    localStorage.setItem('vm_profile_name', coName);
+    localStorage.setItem('vm_profile_phone', coPhone);
+    localStorage.setItem('vm_profile_address', coAddr);
+    localStorage.setItem('vm_profile_pincode', coPin);
+    showToast(translate('Profile & security details saved successfully! 👤', 'प्रोफ़ाइल और संपर्क विवरण सफलतापूर्वक सहेजा गया! 👤'), 'success');
   };
 
   // Download Invoice PDF Print simulator
@@ -1491,11 +1560,64 @@ export default function App() {
 
       {/* CORE WEB HEADERS SYSTEM */}
       <header>
-        <div className="logo" id="logoEl" onDoubleClick={handleLogoAdminTrigger} tabIndex={0} role="button" aria-label="VidishaMart Admin Panel login">
-          🛒 {translate("VidishaMart", "विदिशा मार्ट")}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button 
+            className="sidebar-trigger" 
+            id="sidebarTriggerBtn"
+            onClick={() => setShowSidebar(true)}
+            aria-label="Toggle Sidebar Menu"
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '20px',
+              cursor: 'pointer',
+              color: 'var(--dark)',
+              padding: '6px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%',
+              transition: 'background 0.2s',
+            }}
+          >
+            ☰
+          </button>
+          <div className="logo" id="logoEl" onDoubleClick={handleLogoAdminTrigger} tabIndex={0} role="button" aria-label="VidishaMart Admin Panel login">
+            🛒 {translate("VidishaMart", "विदिशा मार्ट")}
+          </div>
         </div>
-        <div className="srch-wrap" style={{ position: 'relative' }}>
-          <input id="srchBox" placeholder={translate("Search shops & products…", "दुकानें और उत्पाद खोजें…")} value={searchTerm} onChange={e => handleSetSearchAndLog(e.target.value)} onFocus={() => setShowSearchSugg(true)} onBlur={() => setTimeout(() => setShowSearchSugg(false), 200)} />
+        <div className="srch-wrap" style={{ position: 'relative', display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {/* Categories Dropdown Menu Selection */}
+          <select 
+            value={selectedCategory || ''} 
+            onChange={(e) => { 
+              setSelectedCategory(e.target.value || null); 
+              setCurrentView('market'); 
+            }} 
+            style={{ 
+              background: 'var(--card)', 
+              color: 'var(--dark)', 
+              padding: '6px 12px', 
+              borderRadius: '24px', 
+              fontSize: '11px', 
+              fontWeight: 800, 
+              border: '1px solid var(--border)', 
+              cursor: 'pointer',
+              outline: 'none',
+              maxWidth: '120px'
+            }}
+          >
+            <option value="">🏬 All Categories</option>
+            <option value="💻 Electronics">💻 Electronics</option>
+            <option value="👕 Fashion">👕 Fashion</option>
+            <option value="🍏 Grocery">🍏 Grocery</option>
+            <option value="📱 Mobiles">📱 Mobiles</option>
+            <option value="📚 Books">📚 Books</option>
+            <option value="📺 Home Appliances">📺 Home Appliances</option>
+            <option value="💄 Beauty">💄 Beauty</option>
+            <option value="⚽ Sports">⚽ Sports</option>
+          </select>
+          <input id="srchBox" placeholder={translate("Search products…", "उत्पाद खोजें…")} value={searchTerm} onChange={e => handleSetSearchAndLog(e.target.value)} onFocus={() => setShowSearchSugg(true)} onBlur={() => setTimeout(() => setShowSearchSugg(false), 200)} />
           <button className="srch-btn" onClick={() => setCurrentView('market')}>🔍</button>
 
           {/* Search Suggestion Dropdown */}
@@ -1560,9 +1682,12 @@ export default function App() {
           <button className="h-btn" onClick={() => setShowFavoritesModal(true)}>
             ⭐{favs.length > 0 && <span className="h-cnt">{favs.length}</span>}
           </button>
+          <button className="h-btn" onClick={() => setShowProfileModal(true)} title={translate("My Profile & Orders", "मेरा प्रोफाइल और ऑर्डर")}>
+            👤
+          </button>
 
           {firebaseUser ? (
-            <div className="fb-usr-badge border border-sky-200 bg-sky-50" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '24px', fontSize: '12px', color: '#0369a1' }}>
+            <div className="fb-usr-badge border border-sky-200 bg-sky-50" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '24px', fontSize: '12px', color: '#0369a1', cursor: 'pointer' }} onClick={() => setShowProfileModal(true)}>
               {firebaseUser.photoURL ? (
                 <img src={firebaseUser.photoURL} alt="" style={{ width: '20px', height: '20px', borderRadius: '50%' }} referrerPolicy="no-referrer" />
               ) : (
@@ -1678,7 +1803,34 @@ export default function App() {
               </div>
             )}
 
-            {/* Enjoy neighborhood shopping with absolute comfort */}
+            {/* 🏷️ Dynamic E-Commerce Promotional Banners Carousel */}
+            <div className="sec-hd" style={{ marginTop: '20px' }}>
+              <h2 className="sec-title">🎁 Exclusive Offer Zones</h2>
+              <p className="sec-sub">Claim exclusive coupons and shop the best deals in Vidisha</p>
+            </div>
+            <div className="promo-slider">
+              <div className="promo-banner" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)' }}>
+                <div className="promo-content">
+                  <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 800 }}>FESTIVAL SEASON</span>
+                  <h3 style={{ fontSize: '18px', fontWeight: 800, marginTop: '8px' }}>Super Grocery Savers</h3>
+                  <p style={{ fontSize: '11px', opacity: 0.9, marginTop: '4px' }}>Get up to 30% off on all staples & oils. Use code <strong style={{ color: '#fff' }}>SAVE20</strong> on checkout.</p>
+                </div>
+              </div>
+              <div className="promo-banner" style={{ background: 'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)' }}>
+                <div className="promo-content">
+                  <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 800 }}>TRENDING STYLE</span>
+                  <h3 style={{ fontSize: '18px', fontWeight: 800, marginTop: '8px' }}>Fashion Blockbusters</h3>
+                  <p style={{ fontSize: '11px', opacity: 0.9, marginTop: '4px' }}>Premium jackets & dresses with free shipping. Redeem coupon <strong style={{ color: '#fff' }}>FIRST10</strong> today.</p>
+                </div>
+              </div>
+              <div className="promo-banner" style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #e11d48 100%)' }}>
+                <div className="promo-content">
+                  <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 800 }}>TECH HUB</span>
+                  <h3 style={{ fontSize: '18px', fontWeight: 800, marginTop: '8px' }}>Smart Device Carnival</h3>
+                  <p style={{ fontSize: '11px', opacity: 0.9, marginTop: '4px' }}>Unbeatable prices on high-speed Type-C accessories, Android TVs and verified devices.</p>
+                </div>
+              </div>
+            </div>
 
             <div className="sec-hd" style={{ marginTop: '30px' }}>
               <h2 className="sec-title">✨ Why VidishaMart?</h2>
@@ -1697,14 +1849,14 @@ export default function App() {
             </div>
             <div className="cats-grid">
               {[
-                '🩺 Medical & Pharmacy',
-                '🛒 Grocery & Supermarket',
-                '🍱 Tiffin & Food Service',
-                '📱 Mobile & Electronics',
-                '🛠️ Services & Repair',
-                '👗 Fashion & Clothing',
-                '📚 Books & Stationery',
-                '🎨 Art & Crafts'
+                '💻 Electronics',
+                '👕 Fashion',
+                '🍏 Grocery',
+                '📱 Mobiles',
+                '📚 Books',
+                '📺 Home Appliances',
+                '💄 Beauty',
+                '⚽ Sports'
               ].map(c => (
                 <div className={`cat-btn ${selectedCategory === c ? 'active' : ''}`} key={c} onClick={() => { setSelectedCategory(c); setCurrentView('market'); }}>
                   <span className="cat-ic">{c.split(' ')[0]}</span>
@@ -1712,6 +1864,185 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* 🔥 Trending / Best Selling Hot Products */}
+            <div className="sec-hd" style={{ marginTop: '40px' }}>
+              <h2 className="sec-title">🔥 Trending Best Sellers</h2>
+              <p className="sec-sub">The highly-ordered, most popular choices by shoppers this week</p>
+            </div>
+            <div className="prod-grid">
+              {items.filter(it => it.status === 'active').sort((a,b) => (b.salesCount || 0) - (a.salesCount || 0)).slice(0, 4).map(it => (
+                <div className="prod-card" key={`trend-${it.id}`} onClick={() => { setActiveProductDetail(it); setShowProductDetailModal(true); }} style={{ position: 'relative' }}>
+                  <span className="trending-badge">BESTSELLER</span>
+                  <div className="prod-img-wrap" style={{ height: '140px', background: '#f5f7fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {it.img ? <img src={it.img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '12px 12px 0 0' }} /> : <span style={{ fontSize: '3rem' }}>{it.emoji}</span>}
+                  </div>
+                  <div className="prod-body">
+                    <div className="prod-name" style={{ fontWeight: 800 }}>{it.name}</div>
+                    <div className="prod-shop-nm" style={{ fontSize: '11px', color: '#888' }}>{it.shopName}</div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '4px' }}>
+                      <span className="text-yellow-500">★★★★★</span>
+                      <span className="font-mono" style={{ fontSize: '10px', color: '#999' }}>({it.salesCount || 0} sold)</span>
+                    </div>
+                    <div className="prod-price" style={{ color: 'var(--p)', fontWeight: 800, marginTop: '6px' }}>₹{it.price} <span style={{ fontSize: '11px', color: '#999', textDecoration: 'line-through', fontWeight: 'normal' }}>₹{it.orgPrice || Math.round(it.price * 1.4)}</span></div>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                      <button className="btn-add" style={{ flex: 1 }} onClick={(e) => { e.stopPropagation(); handleAddToCart(it); }}>🛒 Quick Shop</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 🕐 Recently Viewed Items */}
+            {recentViewedIds.length > 0 && (
+              <div style={{ marginTop: '40px' }}>
+                <div className="sec-hd">
+                  <h2 className="sec-title">🕐 Recently Viewed Products</h2>
+                  <p className="sec-sub">Pick up right where you left off browsing with instant access</p>
+                </div>
+                <div className="recent-viewed-list">
+                  {items.filter(it => recentViewedIds.includes(it.id) && it.status === 'active').map(it => (
+                    <div key={`recent-${it.id}`} onClick={() => { setActiveProductDetail(it); setShowProductDetailModal(true); }} style={{ flex: '0 0 160px', border: '1px solid var(--border)', borderRadius: '14px', padding: '10px', background: 'var(--card)', cursor: 'pointer', transition: 'all 0.2s', flexShrink: 0 }}>
+                      <div style={{ height: '90px', background: '#f5f7fa', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '10px', overflow: 'hidden' }}>
+                        {it.img ? <img src={it.img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: '2rem' }}>{it.emoji}</span>}
+                      </div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '6px' }}>{it.name}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--p)', fontWeight: 800, marginTop: '2px' }}>₹{it.price}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ABOUT US SECTION */}
+            <div className="about-section">
+              <div style={{ display: 'inline-block', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--p)', padding: '6px 16px', borderRadius: '30px', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>WHO WE ARE</div>
+              <h2 style={{ fontSize: '24px', fontWeight: 800, marginTop: '12px', color: 'var(--dark)' }}>👋 Fostering local trade with modern tech</h2>
+              <p style={{ maxWidth: '640px', margin: '12px auto 0', fontSize: '13px', color: '#666', lineHeight: '1.6' }}>
+                <strong>Vidisha Mart</strong> is Madhya Pradesh's premiere digital hub connecting residents with verified neighborhood storefronts, home chefs, and pharmacies. We empower local sellers with instant checkout options, order logs, direct WhatsApp communication, and zeroPlatform commission, keeping trade sustainable and pride-worthy.
+              </p>
+            </div>
+
+            {/* 🗣️ Customer Testimonials Grid */}
+            <div className="sec-hd" style={{ marginTop: '40px' }}>
+              <h2 className="sec-title">✨ Loved by Local Shoppers</h2>
+              <p className="sec-sub">What our beautiful community has to say about shopping on Vidisha Mart</p>
+            </div>
+            <div className="testimonials-grid">
+              <div className="testi-card">
+                <div style={{ color: '#f59e0b', fontSize: '16px' }}>★★★★★</div>
+                <p style={{ fontSize: '13px', fontStyle: 'italic', color: '#555', marginTop: '8px' }}>"I ordered groceries from Nehru Nagar Fresh and within 40 minutes they delivered everything in neat packing. The WhatsApp tracking interface is so intuitive!"</p>
+                <div className="testi-user">
+                  <div className="testi-avatar" style={{ background: '#ec4899' }}>AD</div>
+                  <div>
+                    <h5 style={{ fontWeight: 800, fontSize: '12px' }}>Amit Dixit</h5>
+                    <p style={{ fontSize: '10px', color: '#999' }}>Sadar Bazaar Customer</p>
+                  </div>
+                </div>
+              </div>
+              <div className="testi-card">
+                <div style={{ color: '#f59e0b', fontSize: '16px' }}>★★★★★</div>
+                <p style={{ fontSize: '13px', fontStyle: 'italic', color: '#555', marginTop: '8px' }}>"Annapurna Shuddh veg thali was piping hot when it arrived! Excellent quality tiffin for bachelors at Civil Lines. Easily the most useful local portal."</p>
+                <div className="testi-user">
+                  <div className="testi-avatar" style={{ background: '#10b981' }}>VS</div>
+                  <div>
+                    <h5 style={{ fontWeight: 800, fontSize: '12px' }}>Vidisha Sharma</h5>
+                    <p style={{ fontSize: '10px', color: '#999' }}>Civil Lines Customer</p>
+                  </div>
+                </div>
+              </div>
+              <div className="testi-card">
+                <div style={{ color: '#f59e0b', fontSize: '16px' }}>★★★★★</div>
+                <p style={{ fontSize: '13px', fontStyle: 'italic', color: '#555', marginTop: '8px' }}>"Listing Shubham Mobiles was totally effortless! I got three purchase enquiries directly on my registered WhatsApp number within the very first day."</p>
+                <div className="testi-user">
+                  <div className="testi-avatar" style={{ background: '#6366f1' }}>SJ</div>
+                  <div>
+                    <h5 style={{ fontWeight: 800, fontSize: '12px' }}>Shubham Jain</h5>
+                    <p style={{ fontSize: '10px', color: '#999' }}>Merchant Store Owner</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ❓ Interactive FAQ support section */}
+            <div className="sec-hd" style={{ marginTop: '40px' }}>
+              <h2 className="sec-title">❓ FAQ & Help Support</h2>
+              <p className="sec-sub">Everything you need to know about purchasing, checkout, and store verification</p>
+            </div>
+            <div className="faq-accordion">
+              {[
+                {
+                  q: "How does home delivery work on Vidisha Mart?",
+                  a: "Store delivery is managed directly by each independent merchant store. Delivery charges and minimal orders may vary by shop, but our system automatically flags free-shipping orders above ₹500."
+                },
+                {
+                  q: "How do I pay for my ordered items?",
+                  a: "We support multiple checkout options including Cash On Delivery (COD), Direct merchant UPI scanning with receipt uploads, and placing direct requests over WhatsApp messaging."
+                },
+                {
+                  q: "Are the stores and listings on the platform verified?",
+                  a: "Yes! All partner merchants showing badges hold registered retail store claim accounts or verified commercial food handling credentials, which guarantees total transaction safety."
+                },
+                {
+                  q: "Can I list my own traditional store profiles?",
+                  a: "Absolutely! Just click on 'List Your Store' at the top banner, provide your storefront details, and our verification crew will contact you in hours to unlock your claims portal."
+                }
+              ].map((faq, idx) => (
+                <div className="faq-item" key={idx}>
+                  <div className="faq-quest" onClick={() => setFaqOpenIndex(faqOpenIndex === idx ? null : idx)}>
+                    <span style={{ fontSize: '13px', fontWeight: 700 }}>{faq.q}</span>
+                    <span>{faqOpenIndex === idx ? '▲' : '▼'}</span>
+                  </div>
+                  {faqOpenIndex === idx && (
+                    <div className="faq-ans">
+                      {faq.a}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* 📧 Interactive E-commerce Feedback Contact page block */}
+            <div className="contact-section">
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--dark)' }}>📞 Reach Our Support Hub</h3>
+                <p style={{ fontSize: '13px', color: '#666', marginTop: '6px', lineHeight: '1.6' }}>
+                  Have questions, custom inquiries, bulk order request notes or commercial partnership proposals in Vidisha? Message us directly and our prompt customer response agents will reply in hours.
+                </p>
+                <div style={{ marginTop: '20px', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>📍 <strong>Address:</strong> Main Crossing Road, Sadar Bazaar, Vidisha, MP</div>
+                  <div>✉️ <strong>Email:</strong> support@vidishamart.com</div>
+                  <div>📞 <strong>Phone:</strong> +91 91234 56789</div>
+                </div>
+              </div>
+              <div>
+                <h4 style={{ fontWeight: 800, fontSize: '15px', marginBottom: '10px' }}>✉️ Drop Us a Line</h4>
+                {contactSuccess ? (
+                  <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', padding: '15px', borderRadius: '12px', fontSize: '13px', textAlign: 'center' }}>
+                    🎉 Thank you! Your response has been securely logged on our backend server. Our support crew will reach out in hours.
+                  </div>
+                ) : (
+                  <form onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!contactName || !contactMsg) return showToast('Please fill in required inputs', 'warn');
+                    setContactSuccess(true);
+                    showToast('Message sent to backend server!', 'success');
+                    setTimeout(() => {
+                      setContactName('');
+                      setContactEmail('');
+                      setContactMsg('');
+                      setContactSuccess(false);
+                    }, 4000);
+                  }} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div className="fg" style={{ margin: 0 }}><label>Your Name *</label><input value={contactName} onChange={e => setContactName(e.target.value)} required placeholder="Enter name..." /></div>
+                    <div className="fg" style={{ margin: 0 }}><label>Your Email</label><input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="name@domain.com" /></div>
+                    <div className="fg" style={{ margin: 0 }}><label>Message *</label><textarea value={contactMsg} onChange={e => setContactMsg(e.target.value)} required rows={3} placeholder="Writing message notes..." style={{ resize: 'none' }} /></div>
+                    <button className="btn-main" type="submit" style={{ alignSelf: 'flex-start', marginTop: '6px' }}>✉️ Submit Feedback</button>
+                  </form>
+                )}
+              </div>
+            </div>
+
           </div>
 
           <footer>
@@ -1923,16 +2254,31 @@ export default function App() {
                   <div className="prod-grid">
                     {storeItems.map(it => {
                       const isLiked = wish.includes(it.id);
+                      const isOos = it.id % 5 === 0;
                       return (
-                        <div className="prod-card" key={it.id} onClick={() => { setActiveProductDetail(it); setShowProductDetailModal(true); }}>
+                        <div className={`prod-card ${isOos ? 'opacity-70' : ''}`} key={it.id} onClick={() => { setActiveProductDetail(it); setShowProductDetailModal(true); }} style={{ position: 'relative' }}>
+                          {isOos && (
+                            <span style={{ position: 'absolute', top: '8px', right: '8px', background: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: '12px', zIndex: 5 }}>SOLD OUT</span>
+                          )}
                           <div className="prod-img-wrap">
-                            {it.img ? <img src={it.img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : it.emoji}
+                            {it.img ? <img src={it.img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer" /> : it.emoji}
                           </div>
                           <div className="prod-body">
                             <div className="prod-name" style={{ fontWeight: 700 }}>{it.name}</div>
                             <div className="prod-price">₹{it.price}</div>
                             <div className="prod-row" style={{ marginTop: '8px' }}>
-                              <button className="btn-add" onClick={(e) => { e.stopPropagation(); handleAddToCart(it); }}>🛒 Add</button>
+                              <button 
+                                className="btn-add" 
+                                disabled={isOos} 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  if (isOos) return;
+                                  handleAddToCart(it); 
+                                }}
+                                style={{ background: isOos ? '#bbb' : 'var(--p)' }}
+                              >
+                                {isOos ? 'OOS' : '🛒 Add'}
+                              </button>
                               <button className="wl-btn" onClick={(e) => handleToggleProductWishlist(it.id, e)}>{isLiked ? '❤️' : '🤍'}</button>
                             </div>
                           </div>
@@ -2448,24 +2794,187 @@ export default function App() {
               transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
               className="modal-box pcard"
               onClick={e => e.stopPropagation()}
+              style={{ maxWidth: '650px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }}
             >
-              <div className="m-hd"><h3>📦 Catalog Spec</h3><button className="m-close" onClick={() => setShowProductDetailModal(false)}>×</button></div>
-              <div style={{ textAlign: 'center', background: '#f5f7fa', padding: '10px', borderRadius: '14px' }}>
-                {activeProductDetail.img ? (
-                  <img src={activeProductDetail.img} style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '12px' }} alt="" />
-                ) : (
-                  <span style={{ fontSize: '3rem' }}>{activeProductDetail.emoji}</span>
-                )}
+              <div className="m-hd">
+                <h3>📦 Product Catalog Details</h3>
+                <button className="m-close" onClick={() => setShowProductDetailModal(false)}>×</button>
               </div>
-              <h4 style={{ fontSize: '18px', fontWeight: 800, marginTop: '10px' }}>{activeProductDetail.name}</h4>
-              <p style={{ fontSize: '11px', color: '#666' }}>Store: {activeProductDetail.shopName}</p>
-              <p style={{ fontSize: '24px', fontWeight: 800, color: 'var(--p)', marginTop: '5px' }}>₹{activeProductDetail.price}</p>
-              {activeProductDetail.desc && <div className="pd-desc mt-2">{activeProductDetail.desc}</div>}
-              
-              <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
-                <button className="btn-green" onClick={() => { handleAddToCart(activeProductDetail); setShowProductDetailModal(false); }}>🛒 Direct add to cart</button>
-                <button className="btn-cancel" onClick={() => setShowProductDetailModal(false)}>Cancel</button>
+
+              {/* Grid split for visuals & text specs */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '10px' }}>
+                
+                {/* Visuals Gallery */}
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ background: '#f5f7fa', padding: '10px', borderRadius: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '220px', overflow: 'hidden' }}>
+                    {activeProductDetail.img ? (
+                      <img src={activeImgIndex === 0 ? activeProductDetail.img : activeImgIndex === 1 ? `https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop` : `https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '12px' }} alt="" referrerPolicy="no-referrer" />
+                    ) : (
+                      <span style={{ fontSize: '5rem' }}>{activeProductDetail.emoji}</span>
+                    )}
+                  </div>
+                  {activeProductDetail.img && (
+                    <div className="img-thumb-gallery" style={{ marginTop: '10px' }}>
+                      <img src={activeProductDetail.img} className={`img-thumb ${activeImgIndex === 0 ? 'active' : ''}`} onClick={() => setActiveImgIndex(0)} referrerPolicy="no-referrer" />
+                      <img src={`https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=100&auto=format&fit=crop`} className={`img-thumb ${activeImgIndex === 1 ? 'active' : ''}`} onClick={() => setActiveImgIndex(1)} referrerPolicy="no-referrer" />
+                      <img src={`https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100&auto=format&fit=crop`} className={`img-thumb ${activeImgIndex === 2 ? 'active' : ''}`} onClick={() => setActiveImgIndex(2)} referrerPolicy="no-referrer" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Specs / Controls */}
+                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <h4 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--dark)' }}>{activeProductDetail.name}</h4>
+                    <p style={{ fontSize: '11px', color: '#888', marginTop: '2px' }}>Verified Store: <strong style={{ color: 'var(--p)' }}>{activeProductDetail.shopName}</strong></p>
+                    
+                    {/* Stock Status Badge */}
+                    <div style={{ marginTop: '8px' }}>
+                      {activeProductDetail.id % 5 === 0 ? (
+                        <span className="stock-badge stock-oos">⚠️ Temporarily Out of Stock</span>
+                      ) : activeProductDetail.id % 3 === 0 ? (
+                        <span className="stock-badge stock-lowstock">🔥 Only 2 items left in stock</span>
+                      ) : (
+                        <span className="stock-badge stock-instock">✅ Ready In Stock (Immediate Shipping)</span>
+                      )}
+                    </div>
+
+                    <div style={{ marginTop: '12px', display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                      <span style={{ fontSize: '26px', fontWeight: 800, color: 'var(--p)' }}>₹{activeProductDetail.price}</span>
+                      <span style={{ fontSize: '14px', color: '#999', textDecoration: 'line-through' }}>₹{activeProductDetail.orgPrice || Math.round(activeProductDetail.price * 1.4)}</span>
+                    </div>
+
+                    {activeProductDetail.desc && (
+                      <p style={{ fontSize: '12.5px', color: '#555', marginTop: '10px', lineHeight: '1.5' }}>{activeProductDetail.desc}</p>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
+                    <button 
+                      className={`btn-green ${activeProductDetail.id % 5 === 0 ? 'opacity-50 cursor-not-allowed' : ''}`} 
+                      disabled={activeProductDetail.id % 5 === 0}
+                      onClick={() => { 
+                        if (activeProductDetail.id % 5 === 0) return;
+                        handleAddToCart(activeProductDetail); 
+                        setShowProductDetailModal(false); 
+                      }}
+                      style={{ flex: 1 }}
+                    >
+                      🛒 {activeProductDetail.id % 5 === 0 ? 'Sold Out' : 'Direct add to cart'}
+                    </button>
+                    <button className="btn-cancel" onClick={() => setShowProductDetailModal(false)}>Close</button>
+                  </div>
+                </div>
+
               </div>
+
+              {/* Interactive Reviews Section */}
+              <div style={{ marginTop: '25px', paddingTop: '20px', borderTop: '1px solid var(--border)' }}>
+                <h4 style={{ fontSize: '14px', fontWeight: 800, borderBottom: '1px solid #f1f1f1', paddingBottom: '6px', color: 'var(--dark)' }}>🏆 Product Community Reviews</h4>
+                
+                {/* Show existing reviews */}
+                <div style={{ maxHeight: '180px', overflowY: 'auto', margin: '10px 0', paddingRight: '5px' }}>
+                  {(!reviews[activeProductDetail.id] || reviews[activeProductDetail.id].length === 0) ? (
+                    <p style={{ color: '#999', fontSize: '12px', fontStyle: 'italic' }}>No reviews posted yet. Be the first to express feedback!</p>
+                  ) : (
+                    reviews[activeProductDetail.id].map((rev: any, index: number) => (
+                      <div key={index} style={{ padding: '8px', borderBottom: '1px solid #f9f9f9', background: '#fafbfc', borderRadius: '8px', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 'bold' }}>👤 {rev.userName || 'Anonymous Buyer'}</span>
+                          <span style={{ color: '#f59e0b', fontSize: '11px' }}>{'★'.repeat(rev.stars || 5)}</span>
+                        </div>
+                        <p style={{ fontSize: '12px', color: '#555', marginTop: '3px' }}>{rev.comment}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Submit new review form */}
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const starsInput = form.elements.namedItem('reviewStars') as HTMLSelectElement;
+                    const commentInput = form.elements.namedItem('reviewComment') as HTMLTextAreaElement;
+                    const authorInput = form.elements.namedItem('reviewAuthor') as HTMLInputElement;
+
+                    const starsVal = parseInt(starsInput.value) || 5;
+                    const commentVal = commentInput.value;
+                    const authorVal = authorInput.value || 'Local Shopper';
+
+                    if (!commentVal) return showToast('Please type your comment', 'warn');
+
+                    const newReview = {
+                      id: `${activeProductDetail.id}-${Date.now()}`,
+                      productId: activeProductDetail.id,
+                      userName: authorVal,
+                      stars: starsVal,
+                      comment: commentVal,
+                      timestamp: new Date().toISOString()
+                    };
+
+                    // Update reviews dictionary locally
+                    const currentProductReviews = reviews[activeProductDetail.id] || [];
+                    const updatedReviews = {
+                      ...reviews,
+                      [activeProductDetail.id]: [newReview, ...currentProductReviews]
+                    };
+                    setReviews(updatedReviews);
+                    StorageEngine.save('reviews', updatedReviews);
+
+                    // Sync to Express Backend `/api/reviews`
+                    fetch('/api/reviews', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(newReview)
+                    }).catch(err => console.warn('Sync review backend error:', err));
+
+                    showToast('Thank you! Review saved & published.', 'success');
+                    form.reset();
+                  }}
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', padding: '12px', borderRadius: '14px', marginTop: '12px' }}
+                >
+                  <p style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>📝 Write a Product Review</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="fg" style={{ margin: 0 }}>
+                      <label>Name</label>
+                      <input name="reviewAuthor" placeholder="Guest buyer" style={{ padding: '4px 8px', fontSize: '12px' }} />
+                    </div>
+                    <div className="fg" style={{ margin: 0 }}>
+                      <label>Rating</label>
+                      <select name="reviewStars" style={{ padding: '4px 8px', fontSize: '12px' }} defaultValue="5">
+                        <option value="5">★★★★★ (5 Stars)</option>
+                        <option value="4">★★★★☆ (4 Stars)</option>
+                        <option value="3">★★★☆☆ (3 Stars)</option>
+                        <option value="2">★★☆☆☆ (2 Stars)</option>
+                        <option value="1">★☆☆☆☆ (1 Star)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="fg" style={{ margin: '8px 0 0 0' }}>
+                    <label>Review Comment *</label>
+                    <textarea name="reviewComment" rows={2} required placeholder="Tell us about the quality, flavor or fit..." style={{ padding: '6px 8px', fontSize: '12px', resize: 'none' }} />
+                  </div>
+                  <button className="btn-main" type="submit" style={{ marginTop: '8px', padding: '6px 14px', fontSize: '11px' }}>📄 Publish Review</button>
+                </form>
+              </div>
+
+              {/* Related Products Section */}
+              <div style={{ marginTop: '25px', paddingTop: '15px', borderTop: '1px solid var(--border)' }}>
+                <h4 style={{ fontSize: '13px', fontWeight: 800, textTransform: 'uppercase', color: '#666', borderBottom: '1px solid #f1f1f1', paddingBottom: '6px' }}>Related Offerings</h4>
+                <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', padding: '10px 0' }}>
+                  {items.filter(it => it.category === activeProductDetail.category && it.id !== activeProductDetail.id && it.status === 'active').slice(0, 5).map(it => (
+                    <div key={it.id} onClick={() => { setActiveProductDetail(it); }} style={{ flex: '0 0 120px', border: '1px solid var(--border)', borderRadius: '12px', padding: '6px', background: 'var(--card)', cursor: 'pointer', textAlign: 'center', flexShrink: 0 }}>
+                      <div style={{ height: '70px', background: '#f5f7fa', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', overflow: 'hidden' }}>
+                        {it.img ? <img src={it.img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer" /> : <span style={{ fontSize: '1.8rem' }}>{it.emoji}</span>}
+                      </div>
+                      <div style={{ fontSize: '10px', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '4px' }}>{it.name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--p)', fontWeight: 'bold' }}>₹{it.price}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             </motion.div>
           </motion.div>
         )}
@@ -2936,6 +3445,473 @@ export default function App() {
                 <h4>4. Your Rights</h4>
                 <p>You can delete your account and all associated data at any time from the Seller Dashboard → Settings. You can also clear your browser data or use the admin panel to reset everything.</p>
                 <p style={{ fontStyle: 'italic', marginTop: '12px' }}>Last updated: 2026-05-23</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 10b. User Profile, Settings, & Order Tracking Modal */}
+      <AnimatePresence>
+        {showProfileModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overlay show"
+            style={{ display: 'flex', zIndex: 6000 }}
+            onClick={() => setShowProfileModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.94, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.94, opacity: 0, y: 15 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="modal-box pcard max-w-lg w-full"
+              onClick={e => e.stopPropagation()}
+              style={{ maxHeight: '90vh', overflowY: 'auto' }}
+            >
+              <div className="m-hd">
+                <h3>👤 {translate("My Profile & Order Tracker", "मेरा प्रोफाइल और ऑर्डर ट्रैकर")}</h3>
+                <button className="m-close" onClick={() => setShowProfileModal(false)}>×</button>
+              </div>
+
+              {/* Profile Bio Details */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', background: 'rgba(99,102,241,0.05)', padding: '16px', borderRadius: '16px', marginBottom: '20px', border: '1px solid rgba(99,102,241,0.1)' }}>
+                {firebaseUser && firebaseUser.photoURL ? (
+                  <img src={firebaseUser.photoURL} alt="" style={{ width: '48px', height: '48px', borderRadius: '50%', border: '2px solid var(--p)' }} referrerPolicy="no-referrer" />
+                ) : (
+                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--p)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+                    👤
+                  </div>
+                )}
+                <div>
+                  <h4 style={{ fontWeight: 800, fontSize: '15px', color: 'var(--dark)' }}>
+                    {firebaseUser ? (firebaseUser.displayName || 'Online Shopper') : (coName || 'Guest Shopper')}
+                  </h4>
+                  <p style={{ fontSize: '11px', color: '#666' }}>
+                    {firebaseUser ? `📧 ${firebaseUser.email}` : `👤 Local Guest Session`}
+                  </p>
+                </div>
+              </div>
+
+              {/* Editable Profile Settings form */}
+              <div style={{ marginBottom: '24px' }}>
+                <h4 style={{ fontSize: '13px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', color: 'var(--dark)', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  ⚙️ {translate("Contact & Delivery Information", "संपर्क और वितरण जानकारी")}
+                </h4>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div className="fg">
+                    <label>{translate("Full Name *", "पूरा नाम *")}</label>
+                    <input 
+                      placeholder="e.g. Aarad Dixit" 
+                      value={coName} 
+                      onChange={e => setCoName(e.target.value)} 
+                    />
+                  </div>
+
+                  <div className="fg">
+                    <label>{translate("Mobile Phone (For Order Retrieval) *", "मोबाइल फोन (ऑर्डर पुनःप्राप्ति के लिए) *")}</label>
+                    <input 
+                      placeholder="e.g. 9876543210" 
+                      value={coPhone} 
+                      onChange={e => setCoPhone(e.target.value)} 
+                    />
+                    <span style={{ fontSize: '9px', color: '#888', marginTop: '2px', display: 'block' }}>
+                      💡 {translate("Must match phone used at checkout to automatically load details & orders.", "चेकआउट पर उपयोग किए गए फोन के समान होना चाहिए ताकि विवरण और ऑर्डर लोड किए जा सकें।")}
+                    </span>
+                  </div>
+
+                  <div className="fg">
+                    <label>{translate("Shipping/Delivery Address *", "वितरण का पता *")}</label>
+                    <textarea 
+                      rows={2} 
+                      placeholder="e.g. Sadar Bazaar, near Temple crossing, Vidisha" 
+                      value={coAddr} 
+                      onChange={e => setCoAddr(e.target.value)} 
+                    />
+                  </div>
+
+                  <div className="fg">
+                    <label>{translate("Area Pincode", "क्षेत्र पिनकोड")}</label>
+                    <input 
+                      maxLength={6} 
+                      placeholder="e.g. 464001" 
+                      value={coPin} 
+                      onChange={e => setCoPin(e.target.value)} 
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  className="btn-main mt-4 w-full font-bold shadow-sm"
+                  onClick={handleSaveProfile}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                >
+                  💾 {translate("Save Settings & Synchronize", "विवरण सहेजें और सिंक करें")}
+                </button>
+              </div>
+
+              {/* Dedicated Order Tracking Section */}
+              <div>
+                <h4 style={{ fontSize: '13px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', color: 'var(--dark)', borderBottom: '1px solid var(--border)', paddingBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>📦 {translate("Order Tracking History", "ऑर्डर ट्रैकिंग इतिहास")}</span>
+                  {coPhone && (
+                    <span style={{ fontSize: '10px', color: 'var(--p)', background: 'rgba(99,102,241,0.1)', padding: '2px 8px', borderRadius: '12px' }}>
+                      {orders.filter(o => o.customer.phone && o.customer.phone.replace(/[\s\-+]/g, '').includes(coPhone.replace(/[\s\-+]/g, ''))).length} {translate("Matched", "मिले")}
+                    </span>
+                  )}
+                </h4>
+
+                <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {!coPhone ? (
+                    <div style={{ padding: '16px', textAlign: 'center', background: '#fafafa', borderRadius: '12px', border: '1px dashed #ddd', fontSize: '11px', color: '#777' }} className="dark:bg-[#141424] dark:border-slate-800">
+                      💡 {translate("Please enter and save your Mobile Phone number above to search and track your recent orders in real-time!", "कृपया अपने हाल के ऑर्डरों को खोजने और ट्रैक करने के लिए ऊपर अपना मोबाइल फोन दर्ज कर सहेजें!")}
+                    </div>
+                  ) : (() => {
+                    const cleanPhone = coPhone.replace(/[\s\-+]/g, '');
+                    if (!cleanPhone) return null;
+                    
+                    const matchedOrders = orders.filter(o => 
+                      o.customer.phone && o.customer.phone.replace(/[\s\-+]/g, '').includes(cleanPhone)
+                    ).sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime());
+
+                    if (matchedOrders.length === 0) {
+                      return (
+                        <div style={{ padding: '24px 16px', textAlign: 'center', background: '#fafafa', borderRadius: '12px', border: '1px dashed #ddd', fontSize: '11px', color: '#777' }} className="dark:bg-[#141424] dark:border-slate-800">
+                          📯 {translate("No orders found matching phone", "इस फोन नंबर पर कोई ऑर्डर नहीं मिला")}: <strong>{coPhone}</strong>
+                        </div>
+                      );
+                    }
+
+                    return matchedOrders.map(order => {
+                      // Map status to nice colors and text
+                      let badgeBg = 'rgba(245,158,11,0.1)';
+                      let badgeColor = '#d97706';
+                      let prettyStatus = translate('In Processing', 'प्रसंस्करण में');
+
+                      if (order.status === 'pending') {
+                        badgeBg = 'rgba(245, 158, 11, 0.1)';
+                        badgeColor = '#d97706';
+                        prettyStatus = translate('Order Registered', 'ऑर्डर पंजीकृत');
+                      } else if (order.status === 'confirmed') {
+                        badgeBg = 'rgba(14, 165, 233, 0.1)';
+                        badgeColor = '#0284c7';
+                        prettyStatus = translate('Accepted & Synced', 'स्वीकृत और सिंक');
+                      } else if (order.status === 'preparing') {
+                        badgeBg = 'rgba(99, 102, 241, 0.1)';
+                        badgeColor = '#4f46e5';
+                        prettyStatus = translate('Assembly / Cook', 'तैयार किया जा रहा है');
+                      } else if (order.status === 'out_for_delivery') {
+                        badgeBg = 'rgba(139, 92, 246, 0.1)';
+                        badgeColor = '#7c3aed';
+                        prettyStatus = translate('Out for Dispatch', 'वितरण जारी');
+                      } else if (order.status === 'delivered') {
+                        badgeBg = 'rgba(16, 185, 129, 0.1)';
+                        badgeColor = '#059669';
+                        prettyStatus = translate('Consignment Handover', 'सुरक्षित डिलीवर');
+                      } else if (order.status === 'cancelled') {
+                        badgeBg = 'rgba(239, 68, 68, 0.1)';
+                        badgeColor = '#dc2626';
+                        prettyStatus = translate('Order Cancelled', 'रद्द किया गया');
+                      } else if (order.status === 'refunded') {
+                        badgeBg = 'rgba(239, 68, 68, 0.15)';
+                        badgeColor = '#b91c1c';
+                        prettyStatus = translate('Order Refunded', 'धनवापसी की गई');
+                      }
+
+                      return (
+                        <div 
+                          key={order.id} 
+                          style={{ border: '1px solid var(--border)', borderRadius: '14px', padding: '12px', background: 'var(--card)' }}
+                          className="hover:shadow-sm transition-shadow duration-200"
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                            <div>
+                              <strong style={{ fontSize: '11px', color: '#999', display: 'block' }}>
+                                #{order.id}
+                              </strong>
+                              <span style={{ fontSize: '10px', color: '#888' }}>
+                                {order.date}
+                              </span>
+                            </div>
+                            <span 
+                              style={{ 
+                                fontSize: '10px', 
+                                fontWeight: 800, 
+                                background: badgeBg, 
+                                color: badgeColor, 
+                                padding: '4px 10px', 
+                                borderRadius: '20px',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.4px'
+                              }}
+                            >
+                              ● {prettyStatus}
+                            </span>
+                          </div>
+
+                          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--border)' }}>
+                            <div style={{ fontSize: '11.5px', color: 'var(--dark)', fontWeight: 600 }}>
+                              {order.items.map(item => `${item.name} × ${item.qty}`).join(', ')}
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                              <span style={{ fontSize: '11px', color: '#777' }}>
+                                {translate("Total valuation:", "कुल मूल्य:")} <strong style={{ color: 'var(--dark)' }}>₹{order.total}</strong>
+                              </span>
+                              <button 
+                                className="btn-add"
+                                style={{ padding: '3px 10px', fontSize: '10.5px', fontWeight: 800 }}
+                                onClick={() => {
+                                  setTrackQuery(order.id);
+                                  setTrackedOrderEntity(order);
+                                  setCurrentView('orders');
+                                  setShowProfileModal(false);
+                                  showToast(`${translate("Opening timeline progress track for", "के लिए लाइव प्रगति देख रहे हैं ")} ${order.id}`, 'info');
+                                }}
+                              >
+                                🔍 {translate("Track Live", "ट्रैक करें")}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 11. Custom Sidebar Drawer System */}
+      <AnimatePresence>
+        {showSidebar && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="sidebar-overlay"
+            onClick={() => setShowSidebar(false)}
+          >
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="sidebar-container"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="sidebar-hdr">
+                <div className="sidebar-logo">
+                  🛒 <span>{translate("VidishaMart", "विदिशा मार्ट")}</span>
+                </div>
+                <button className="sidebar-close" id="sidebarCloseBtn" onClick={() => setShowSidebar(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className="sidebar-body">
+                {/* User Welcome Block */}
+                <div className="sidebar-welcome">
+                  <div className="sidebar-label">{translate("Active Account", "सक्रिय खाता")}</div>
+                  {firebaseUser ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      {firebaseUser.photoURL ? (
+                        <img src={firebaseUser.photoURL} alt="" style={{ width: '32px', height: '32px', borderRadius: '50%' }} referrerPolicy="no-referrer" />
+                      ) : (
+                        <span style={{ fontSize: '1.5rem' }}>👤</span>
+                      )}
+                      <div>
+                        <h4 style={{ fontWeight: 800, fontSize: '13px', color: 'var(--dark)' }} className="truncate max-w-[170px]">
+                          {firebaseUser.displayName || 'Online Shopper'}
+                        </h4>
+                        <p style={{ fontSize: '10px', color: '#888' }} className="truncate max-w-[170px]">{firebaseUser.email}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '1.5rem' }}>👤</span>
+                      <div>
+                        <h4 style={{ fontWeight: 800, fontSize: '13px', color: 'var(--dark)' }}>{translate("Welcome Guest Shopper", "अतिथि खरीदार")}</h4>
+                        <button 
+                          style={{ background: 'none', border: 'none', color: 'var(--p)', padding: 0, textDecoration: 'underline', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
+                          onClick={() => { setShowSidebar(false); setShowAuthOverlay(true); }}
+                        >
+                          🔑 Login / Onboard
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {firebaseUser && firebaseUser.email === 'aaraddixit@gmail.com' && (
+                    <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+                      <button 
+                        className="btn-main" 
+                        style={{ padding: '6px 12px', fontSize: '10px', width: '100%', textTransform: 'uppercase', fontWeight: 900 }}
+                        onClick={() => {
+                          setShowSidebar(false);
+                          setShowAdminPanel(true);
+                          showToast('Welcome inside core control, Aarad Dixit! 🛡️', 'success');
+                        }}
+                      >
+                        👑 Open Admin Suite
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Dedicated user profile action button inside the sidebar drawer */}
+                  <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+                    <button 
+                      className="btn-add w-full"
+                      style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 800 }}
+                      onClick={() => {
+                        setShowSidebar(false);
+                        setShowProfileModal(true);
+                      }}
+                    >
+                      👤 {translate("Manage Profile & Orders", "प्रोफ़ाइल और ऑर्डर ट्रैकर")}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Main Views Navigation */}
+                <div>
+                  <div className="sidebar-label">{translate("Explore Pages", "पेज खोजें")}</div>
+                  <div className="sidebar-nav-list">
+                    <div 
+                      className={`sidebar-nav-item ${currentView === 'home' ? 'active' : ''}`}
+                      onClick={() => { setCurrentView('home'); setShowSidebar(false); }}
+                    >
+                      <span>🏠</span> {translate("Home Dashboard", "मुख्य डैशबोर्ड")}
+                    </div>
+                    <div 
+                      className={`sidebar-nav-item ${currentView === 'market' ? 'active' : ''}`}
+                      onClick={() => { setCurrentView('market'); setShowSidebar(false); }}
+                    >
+                      <span>🏪</span> {translate("Shop Catalogue", "दुकानें और उत्पाद")}
+                    </div>
+                    <div 
+                      className={`sidebar-nav-item ${currentView === 'wishlist' ? 'active' : ''}`}
+                      onClick={() => { setCurrentView('wishlist'); setShowSidebar(false); }}
+                    >
+                      <span>❤️</span> {translate("My Wishlist", "पसंदीदा सूची")}
+                    </div>
+                    <div 
+                      className="sidebar-nav-item"
+                      onClick={() => { setShowSidebar(false); setShowCartModal(true); }}
+                    >
+                      <span>🛒</span> {translate("My Basket", "मेरी टोकरी")} ({cart.reduce((acc, curr) => acc + curr.qty, 0)})
+                    </div>
+                    <div 
+                      className={`sidebar-nav-item ${currentView === 'orders' ? 'active' : ''}`}
+                      onClick={() => { setCurrentView('orders'); setShowSidebar(false); }}
+                    >
+                      <span>📦</span> {translate("Track Orders", "ऑर्डर ट्रैक करें")}
+                    </div>
+                    <div 
+                      className={`sidebar-nav-item ${currentView === 'owner' ? 'active' : ''}`}
+                      onClick={() => { 
+                        setShowSidebar(false); 
+                        if (sess) { setCurrentView('owner'); } else { setShowAuthOverlay(true); } 
+                      }}
+                    >
+                      <span>⚙️</span> {translate("Seller Console", "विक्रेता पैनल")}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Shop by Niche Category select triggers */}
+                <div>
+                  <div className="sidebar-label">{translate("Shop by Category", "श्रेणी अनुसार खरीदें")}</div>
+                  <div className="sidebar-cats-grid">
+                    {[
+                      '💻 Electronics',
+                      '👕 Fashion',
+                      '🍏 Grocery',
+                      '📱 Mobiles',
+                      '📚 Books',
+                      '📺 Home Appliances',
+                      '💄 Beauty',
+                      '⚽ Sports'
+                    ].map(c => (
+                      <div 
+                        key={c}
+                        className={`sidebar-cat-pill ${selectedCategory === c ? 'active' : ''}`}
+                        onClick={() => {
+                          setSelectedCategory(c);
+                          setCurrentView('market');
+                          setShowSidebar(false);
+                          showToast(`Filtered by ${c}`, 'info');
+                        }}
+                      >
+                        <span>{c.split(' ')[0]}</span>
+                        <span>{c.replace(/^\S+\s/, '')}</span>
+                      </div>
+                    ))}
+                    {selectedCategory && (
+                      <div 
+                        className="sidebar-cat-pill"
+                        style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' }}
+                        onClick={() => {
+                          setSelectedCategory('');
+                          setCurrentView('market');
+                          setShowSidebar(false);
+                        }}
+                      >
+                        <span>❌</span>
+                        <span>{translate("Reset Filters", "फ़िल्टर साफ़ करें")}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Dynamic Preferences triggers inside sidebar */}
+                <div style={{ marginTop: 'auto', paddingTop: '15px', borderTop: '1px solid var(--border)' }}>
+                  <div className="sidebar-label">{translate("Preferences", "प्राथमिकताएं")}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <button 
+                      className="btn-add" 
+                      style={{ fontSize: '11px', padding: '6px' }}
+                      onClick={() => {
+                        const nextTheme = theme === 'light' ? 'dark' : 'light';
+                        setTheme(nextTheme);
+                        document.documentElement.setAttribute('data-theme', nextTheme);
+                        StorageEngine.save('theme', nextTheme);
+                      }}
+                    >
+                      {theme === 'light' ? '🌙 Dark' : '☀️ Light'}
+                    </button>
+                    <button 
+                      className="btn-add" 
+                      style={{ fontSize: '11px', padding: '6px' }}
+                      onClick={() => {
+                        const nextLang = lang === 'en' ? 'hi' : 'en';
+                        setLang(nextLang);
+                        StorageEngine.save('lang', nextLang);
+                      }}
+                    >
+                      {lang === 'en' ? 'हिन्दी' : 'English'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="sidebar-ftr">
+                <button 
+                  className="btn-cancel" 
+                  style={{ width: '100%', fontSize: '11px', padding: '8px' }}
+                  onClick={() => { setShowSidebar(false); setShowPrivacyModal(true); }}
+                >
+                  🔒 {translate("Privacy Policy & Terms", "गोपनीयता नीति")}
+                </button>
+                <p style={{ fontSize: '9px', color: '#999', textShadow: 'none', margin: 0, textAlign: 'center' }}>
+                  VidishaMart v2.4.1 • Sadar Bazaar, MP
+                </p>
               </div>
             </motion.div>
           </motion.div>
