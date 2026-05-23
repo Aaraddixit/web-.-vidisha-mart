@@ -97,6 +97,19 @@ export default function App() {
   const [showOrderTrackModal, setShowOrderTrackModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showPWAInstallGuide, setShowPWAInstallGuide] = useState(false);
+
+  const handlePWAInstall = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      addLog(`📲 PWA installation choice: ${outcome}`);
+      setDeferredPrompt(null);
+      setShowPWABanner(false);
+    } else {
+      setShowPWAInstallGuide(true);
+    }
+  };
 
   // --- Sub-View Target Entities ---
   const [activeShopDetail, setActiveShopDetail] = useState<Shop | null>(null);
@@ -204,6 +217,7 @@ export default function App() {
   const [confirmModalData, setConfirmModalData] = useState<{ title: string; text: string; onConfirm: () => void } | null>(null);
 
   const [showPWABanner, setShowPWABanner] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [showNotificationsDrop, setShowNotificationsDrop] = useState(false);
 
@@ -332,6 +346,20 @@ export default function App() {
       }
     });
 
+    const handleBeforePrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowPWABanner(true);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforePrompt);
+
+    const handleAppInstalledEvent = () => {
+      showToast(translate('VidishaMart Installed! 📲 enjoy native speeds & updates', 'विदिशा मार्ट स्थापित! देशी गति और अपडेट का आनंद लें'), 'success');
+      setDeferredPrompt(null);
+      setShowPWABanner(false);
+    };
+    window.addEventListener('appinstalled', handleAppInstalledEvent);
+
     // Hide central loader
     setTimeout(() => {
       setAppLoading(false);
@@ -339,6 +367,8 @@ export default function App() {
 
     return () => {
       unsubscribeAuth();
+      window.removeEventListener('beforeinstallprompt', handleBeforePrompt);
+      window.removeEventListener('appinstalled', handleAppInstalledEvent);
     };
   }, []);
 
@@ -1673,6 +1703,9 @@ export default function App() {
               </div>
             )}
           </div>
+          <button className="h-btn" onClick={handlePWAInstall} title={translate("Install Native App", "ऐप इंस्टॉल करें")} style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }}>
+            📲
+          </button>
           <button className="h-btn" onClick={() => setCurrentView('wishlist')}>
             ❤️{wish.length > 0 && <span className="h-cnt">{wish.length}</span>}
           </button>
@@ -1772,6 +1805,7 @@ export default function App() {
               <div className="hero-btns">
                 <button className="hbtn pri" onClick={() => setCurrentView('market')}>🛍️ {translate("Shop Now", "अभी खरीदें")}</button>
                 <button className="hbtn sec" onClick={() => setShowAddStoreModal(true)}>➕ {translate("List Your Store", "अपनी दुकान सूचीबद्ध करें")}</button>
+                <button className="hbtn pwa" onClick={handlePWAInstall} style={{ background: 'linear-gradient(135deg, #10b981, #059669)', color: 'white', border: 'none', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)' }}>📲 {translate("Download App", "ऐप इंस्टॉल करें")}</button>
               </div>
             </div>
           </div>
@@ -3554,6 +3588,30 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Native App Download / Installation promo card */}
+              <div style={{ background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(5, 150, 105, 0.08))', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '16px', borderRadius: '14px', marginBottom: '24px', position: 'relative', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: 800, color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📲 {translate("Get VidishaMart App", "विदिशा मार्ट ऐप डाउनलोड करें")}
+                    </h4>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#065f46', lineHeight: '1.4' }}>
+                      {translate("Transform this website into a native-speed app on your mobile home screen. Fast, safe, and consumes zero megabytes of storage!", "इस वेबसाइट को अपने मोबाइल होम स्क्रीन पर नेटिव-स्पीड ऐप में बदलें। तेज़, सुरक्षित और शून्य स्टोरेज!")}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  className="btn-main mt-3 w-full font-bold shadow-sm"
+                  onClick={() => {
+                    setShowProfileModal(false);
+                    handlePWAInstall();
+                  }}
+                  style={{ background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px' }}
+                >
+                  🚀 {translate("Install App On Device", "डिवाइस पर ऐप इंस्टॉल करें")}
+                </button>
+              </div>
+
               {/* Dedicated Order Tracking Section */}
               <div>
                 <h4 style={{ fontSize: '13px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', color: 'var(--dark)', borderBottom: '1px solid var(--border)', paddingBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3955,12 +4013,99 @@ export default function App() {
 
       {/* PWA simulated prompt boxes */}
       {showPWABanner && (
-        <div className="pwa-banner show" id="pwaBanner">
-          <span className="pwa-msg">📲 Install VidishaMart as PWA for offline speed catalogs access</span>
-          <button className="pwa-act" onClick={() => { showToast('App Installed simulation complete!', 'success'); setShowPWABanner(false); localStorage.setItem('vm_pwa_dis', 'true'); }}>Install</button>
-          <button className="pwa-cls" onClick={() => { setShowPWABanner(false); localStorage.setItem('vm_pwa_dis', 'true'); }}>×</button>
+        <div className="pwa-banner show" id="pwaBanner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'linear-gradient(135deg, #4f46e5, #4338ca)', borderRadius: '12px', padding: '12px 16px', margin: '10px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}>
+          <span className="pwa-msg" style={{ fontSize: '12.5px', color: 'white', fontWeight: 600 }}>📲 {translate("Install VidishaMart App on your device for stellar offline local speeds!", "शानदार ऑफ़लाइन गति के लिए अपने डिवाइस पर विदिशा मार्ट ऐप इंस्टॉल करें!")}</span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="pwa-act" onClick={handlePWAInstall} style={{ padding: '6px 14px', fontSize: '11px', fontWeight: 800, background: '#10b981', color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>{translate("Install App", "ऐप स्थापित करें")}</button>
+            <button className="pwa-cls" onClick={() => { setShowPWABanner(false); localStorage.setItem('vm_pwa_dis', 'true'); }} style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontSize: '12px' }}>×</button>
+          </div>
         </div>
       )}
+
+      {/* 10c. PWA Native-Style Installation Guide Modal */}
+      <AnimatePresence>
+        {showPWAInstallGuide && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overlay show"
+            style={{ display: 'flex', zIndex: 7000 }}
+            onClick={() => setShowPWAInstallGuide(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.94, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.94, opacity: 0, y: 15 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="modal-box pcard max-w-md w-full"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="m-hd">
+                <h3>📲 {translate("Install VidishaMart Application", "विदिशा मार्ट ऐप स्थापित करें")}</h3>
+                <button className="m-close" onClick={() => setShowPWAInstallGuide(false)}>×</button>
+              </div>
+
+              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <img 
+                  src="https://img.icons8.com/color/120/shopping-bag.png" 
+                  alt="App Icon" 
+                  style={{ width: '80px', height: '80px', margin: '0 auto 10px', display: 'block' }} 
+                />
+                <h4 style={{ fontWeight: 800, margin: 0, color: 'var(--dark)' }}>VidishaMart</h4>
+                <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#666' }}>
+                  {translate("Run like a native desktop & mobile app with offline local speeds", "ऑफ़लाइन गति के साथ नेटिव ऐप की तरह चलाएं")}
+                </p>
+              </div>
+
+              {/* iOS Guide Card */}
+              <div style={{ background: '#fafafa', borderRadius: '14px', padding: '14px', marginBottom: '14px', border: '1px solid var(--border)' }} className="dark:bg-[#141424]">
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, margin: '0 0 8px 0', color: '#111827' }} className="dark:text-slate-100">
+                  🍏 {translate("Apple iOS (iPhone/iPad)", "आईफोन उपयोगकर्ताओं के लिए")}
+                </h4>
+                <ol style={{ fontSize: '11.5px', color: '#4b5563', paddingLeft: '18px', margin: 0, lineHeight: '1.6' }} className="dark:text-slate-300">
+                  <li>{translate("Open VidishaMart in the Safari Browser", "सफ़ारी ब्राउज़र में वेबसाइट को खोलें।")}</li>
+                  <li>{translate("Tap the Share button at the bottom navigation menu (square with an up arrow)", "नीचे साझा करें (Share) बटन दबाएं।")}</li>
+                  <li>{translate("Scroll down and select 'Add to Home Screen'", "स्क्रॉल करें और 'Add to Home Screen' चुनें।")}</li>
+                  <li>{translate("Tap 'Add' on upper right corner to install!", "ऊपरी दाएं कोने में 'Add' बटन दबाएं और आनंद लें!")}</li>
+                </ol>
+              </div>
+
+              {/* Android/Chrome Guide Card */}
+              <div style={{ background: '#fafafa', borderRadius: '14px', padding: '14px', marginBottom: '20px', border: '1px solid var(--border)' }} className="dark:bg-[#141424]">
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, margin: '0 0 8px 0', color: '#111827' }} className="dark:text-slate-100">
+                  🤖 {translate("Android & Google Chrome", "एंड्रॉयड और क्रोम के लिए")}
+                </h4>
+                <ol style={{ fontSize: '11.5px', color: '#4b5563', paddingLeft: '18px', margin: 0, lineHeight: '1.6' }} className="dark:text-slate-300">
+                  <li>{translate("Tap on menu button (three parallel dots) in upper-right/bottom", "क्रोम ब्राउज़र के तीन बिंदुओं (Menu) पर टैब करें।")}</li>
+                  <li>{translate("Select 'Install app' or 'Add to Home screen'", "'Install app' या 'Add to Home screen' विकल्प चुनें।")}</li>
+                  <li>{translate("Follow on-screen prompt to download the shortcut immediately!", "स्क्रीन पर आने वाले निर्देशों का पालन करें!")}</li>
+                </ol>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  className="btn-cancel w-full" 
+                  onClick={() => setShowPWAInstallGuide(false)}
+                >
+                  {translate("Close Guide", "बंद करें")}
+                </button>
+                <button 
+                  className="btn-main w-full" 
+                  style={{ background: 'var(--p)' }}
+                  onClick={() => {
+                    setShowPWAInstallGuide(false);
+                    showToast(translate("Shortcut setup loaded. Enjoy VidishaMart!", "शॉर्टकट setup शुरू हुआ।"));
+                  }}
+                >
+                  👌 {translate("Got It!", "समझ गए!")}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -8,3 +8,12 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+// Register service worker for Progressive Web App (PWA) installation & offline support
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('ServiceWorker registration successful with scope: ', reg.scope))
+      .catch(err => console.error('ServiceWorker registration failed: ', err));
+  });
+}
